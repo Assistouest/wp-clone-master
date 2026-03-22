@@ -29,7 +29,7 @@ Nous pensons que la liberté de déplacer vos propres données doit être totale
 
 Le plugin a été conçu pour ignorer les barrières de taille. Que votre site pèse 100 Mo ou 10 Go, le processus d'importation reste accessible sans aucune restriction. Nous avons remplacé les barrières de paiement par de l'ingénierie solide. Là où les autres bloquent l'utilisateur, nous utilisons une architecture qui découpe les tâches lourdes en micro-opérations pour éviter les plantages serveur (timeouts), même sur les hébergements mutualisés les plus restrictifs.
 
-### Une sécurité auditée et une liberté retrouvée
+### L'architecture de migration WordPress la plus sûre du marché
 
 Parce qu'une migration touche au cœur de votre site, nous n'avons fait aucun compromis sur la fiabilité. WP Clone Master intègre des mécanismes de défense de niveau industriel, incluant un installeur qui s'autodétruit après usage pour ne laisser aucune porte ouverte sur votre nouveau serveur. Un audit technique indépendant a d'ailleurs attribué la note de 9.2/10 à notre architecture de sécurité.
 
