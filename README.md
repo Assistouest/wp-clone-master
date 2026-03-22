@@ -9,15 +9,7 @@
 
 # WP Clone Master
 
-### Clonez, migrez et sauvegardez votre site WordPress — en quelques clics.
-
-Pas de compétences serveur requises. Pas de timeout. Pas de données perdues.
-
-<br />
-
-[Démarrer](#démarrer) · [Fonctionnalités](#fonctionnalités) · [Comment ça marche](#comment-ça-marche) · [Nextcloud](#nextcloud) · [FAQ](#faq)
-
-<br />
+### Clonez, migrez et sauvegardez votre site WordPress en quelques clics.
 
 </div>
 
