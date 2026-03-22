@@ -38,7 +38,7 @@ Gardez vos sauvegardes sur le serveur ou envoyez-les automatiquement vers votre 
 ---
 
 
-Si WP Clone Master vous a économisé du temps, vous pouvez soutenir le développement ici :
+Si WP Clone Master vous a économisé du temps, vous pouvez soutenir l'open-source ici :
  
 <a href="https://buymeacoffee.com/assistouest">
   <img src="https://img.shields.io/badge/Soutenir%20le%20projet-Buy%20me%20a%20coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" />
