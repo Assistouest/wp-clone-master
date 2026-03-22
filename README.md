@@ -108,50 +108,6 @@ Depuis l'onglet **Export**, lancez l'export de votre site source. Une fois le ZI
 
 ---
 
-## FAQ
-
-**Le plugin fonctionne-t-il sur les hébergements mutualisés ?**
-
-Oui et c'est précisément le cas d'usage pour lequel il a été conçu. L'export et l'import sont découpés en petites opérations courtes qui respectent les limites d'exécution des hébergements partagés, même les plus restrictifs.
-
-**Que se passe-t-il si l'import est interrompu ?**
-
-Le processus d'import reprend là où il s'est arrêté. La position dans la base de données et l'avancement du remplacement d'URLs sont sauvegardés entre chaque appel. Une interruption réseau ne compromet pas la migration.
-
-**Mon site utilise Elementor / WooCommerce / WPML. Est-ce supporté ?**
-
-Le remplacement d'URLs gère les formats sérialisés, JSON imbriqué, les URLs encodées et les chemins système utilisés par ces plugins. Les fichiers CSS générés par Elementor sont supprimés après migration pour forcer leur régénération avec le nouveau domaine.
-
-**Les sauvegardes manuelles sont-elles supprimées par la rétention ?**
-
-La rétention automatique ne touche que les sauvegardes créées par le planificateur. Vos sauvegardes manuelles sont conservées indéfiniment jusqu'à suppression explicite.
-
-**Le plugin supporte-t-il le multisite WordPress ?**
-
-La version actuelle ne supporte pas le multisite. Un avertissement est affiché si un environnement multisite est détecté.
-
-**Faut-il désactiver des plugins avant de migrer ?**
-
-WP Clone Master gère automatiquement les plugins dont le rechargement immédiat est problématique après migration (pare-feux, plugins de cache, connexions liées au domaine source). Vous en êtes informé dans le résumé de migration et vous les réactivez manuellement après avoir vérifié que le site fonctionne correctement.
-
----
-
-## Configuration requise
-
-| Composant | Version minimale |
-|---|---|
-| WordPress | 5.6 |
-| PHP | 7.4 |
-| MySQL | 5.7 |
-| Extensions PHP | zip, mysqli, json, openssl |
-
----
-
-## Licence
-
-WP Clone Master est distribué sous licence [GPL v2 ou ultérieure](LICENSE).
-
----
  
 Si WP Clone Master vous a économisé du temps, vous pouvez soutenir le développement ici :
  
