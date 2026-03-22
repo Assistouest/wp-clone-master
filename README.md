@@ -45,38 +45,6 @@ Configurez une sauvegarde quotidienne, hebdomadaire ou mensuelle et oubliez-y. E
 
 Gardez vos sauvegardes sur le serveur, ou envoyez-les automatiquement vers votre instance Nextcloud après chaque backup. Les fichiers volumineux sont envoyés par morceaux, sans jamais saturer la mémoire ni dépasser les limites de votre hébergeur.
 
-**Zéro configuration post-migration**
-
-Wordfence, Elementor, WP Rocket, les plugins de cache, tous laissent des traces de l'ancien serveur après une migration. WP Clone Master s'en charge, les fichiers CSS d'Elementor sont régénérés, les règles WAF de Wordfence sont neutralisées, les caches obsolètes sont supprimés. Votre site est propre dès le premier chargement.
-
-**Blocage des moteurs de recherche pendant la migration**
-
-Quand vous importez sur un nouveau domaine, les moteurs de recherche ne doivent pas indexer le site avant que vous l'ayez validé. WP Clone Master possède une option noindex et le maintient actif jusqu'à ce que vous le désactiviez manuellement depuis les réglages WordPress. Pas de risque de contenu dupliqué indexé par erreur.
-
-
-**L'export**
-
-Depuis l'interface d'administration, lancez l'export. Le plugin découpe le travail en petites étapes — un thème, un plugin, un mois d'uploads à la fois — pour ne jamais dépasser les limites de votre hébergeur. Une barre de progression vous indique où en est l'opération. À la fin, un ZIP est prêt à télécharger.
-
-**L'import**
-
-Uploadez l'archive sur le site de destination. Le plugin extrait les données, prépare l'environnement, puis lance un processus indépendant de WordPress pour effectuer l'import. Ce processus est indépendant pour une raison simple : quand on remplace la base de données, WordPress lui-même ne peut plus être utilisé comme support — il faut un outil qui se tient en dehors.
-
-Le remplacement des URLs se fait en plusieurs passes courtes plutôt qu'en une seule requête longue. Même sur un hébergement mutualisé avec des délais d'exécution très courts, la migration ira jusqu'au bout.
-
-**La finalisation**
-
-Une fois l'import terminé, le processus se supprime lui-même du serveur. Il ne laisse aucun fichier temporaire, aucune porte ouverte. Le site est opérationnel.
-
----
-
-## Nextcloud
-
-WP Clone Master s'intègre avec Nextcloud via le protocole d'authentification officiel Login Flow v2 — celui utilisé par l'application desktop Nextcloud. Vous n'avez pas à créer de token manuellement ni à saisir votre mot de passe principal dans l'interface WordPress. Un clic ouvre la page d'autorisation Nextcloud, vous approuvez, la connexion est établie.
-
-Les sauvegardes sont envoyées vers le dossier de votre choix sur Nextcloud. Les fichiers de plusieurs gigaoctets sont découpés en morceaux de 10 Mo et envoyés séquentiellement — aucun proxy, aucun CDN, aucune limite de timeout ne peut bloquer le transfert.
-
----
 
 ## Diagnostic serveur intégré
 
