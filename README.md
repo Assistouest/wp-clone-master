@@ -40,7 +40,7 @@ Pour parer aux risques d'exploitation post-migration, nous avons intégré des m
 
 **Stockage local ou Nextcloud**
 
-Gardez vos sauvegardes sur le serveur, ou envoyez-les automatiquement vers votre instance Nextcloud après chaque backup. Les fichiers volumineux sont envoyés par morceaux, sans jamais saturer la mémoire ni dépasser les limites de votre hébergeur.
+Gardez vos sauvegardes sur le serveur ou envoyez-les automatiquement vers votre instance Nextcloud après chaque backup. Les fichiers volumineux sont envoyés par morceaux.
 
 
 ---
