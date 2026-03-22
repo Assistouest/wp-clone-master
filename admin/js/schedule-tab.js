@@ -268,19 +268,11 @@
             setRunning( true );
             setRunMsg( null );
 
-            // Use the server's WP-timezone "now" as polling baseline.
-            // Browser clock / browser timezone are irrelevant — history entries
-            // come from PHP in the site's configured timezone, so we compare
-            // apples to apples. wpcmData.server_now is injected at page load;
-            // any backup triggered after that will have started_at >= this value.
-            var startedAfter = wpcmData.server_now || '1970-01-01 00:00:00';
+            // Snapshot "now" so we can detect when a new entry appears
+            var startedAfter = new Date().toISOString().slice( 0, 19 ).replace( 'T', ' ' );
 
             api( 'wpcm_run_backup_now' )
                 .then( function ( data ) {
-                    // Update server_now so subsequent "run now" clicks also work
-                    if ( data && data.server_now ) {
-                        wpcmData.server_now = data.server_now;
-                    }
                     // Server responded instantly (fire & forget) — start polling
                     if ( data && data.status === 'queued' ) {
                         startPoll( startedAfter );

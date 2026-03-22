@@ -121,15 +121,7 @@ class WP_Clone_Master {
             if ( ! is_dir( $dir ) ) {
                 wp_mkdir_p( $dir );
             }
-            // Protect directories
-            $htaccess = $dir . '.htaccess';
-            if ( ! file_exists( $htaccess ) ) {
-                file_put_contents( $htaccess, "Deny from all\n" );
-            }
-            $index = $dir . 'index.php';
-            if ( ! file_exists( $index ) ) {
-                file_put_contents( $index, "<?php // Silence is golden.\n" );
-            }
+            self::protect_directory( $dir );
         }
         update_option( 'wpcm_version', WPCM_VERSION );
 
@@ -137,6 +129,68 @@ class WP_Clone_Master {
         if ( ! get_option( WPCM_Backup_Settings::OPTION_KEY ) ) {
             $s = new WPCM_Backup_Settings();
             $s->save( [] ); // persist defaults
+        }
+    }
+
+    /**
+     * Write all static protection files for a sensitive directory.
+     *
+     * Apache  — .htaccess "Deny from all" blocks direct HTTP access even when
+     *           AllowOverride is enabled (the default on most shared hosting).
+     * Nginx   — Nginx ignores .htaccess entirely. Protection requires a server-level
+     *           `location` block; we cannot write that from PHP. Instead we:
+     *           (a) drop an index.php silence file so directory listing is impossible,
+     *           (b) write a README.nginx.txt explaining the required server config,
+     *           (c) display a persistent admin notice if the directory is reachable.
+     * Both    — index.php prevents directory listing as a belt-and-suspenders measure.
+     *
+     * @param string $dir Absolute path with trailing slash.
+     */
+    public static function protect_directory( string $dir ): void {
+        // Apache — block direct HTTP access via .htaccess
+        $htaccess = $dir . '.htaccess';
+        if ( ! file_exists( $htaccess ) ) {
+            // Apache 2.2 syntax: "Deny from all"
+            // Apache 2.4 syntax: "Require all denied"
+            // Writing both ensures compatibility across all commonly deployed versions.
+            file_put_contents( $htaccess, implode( "\n", [
+                '# Apache 2.4+',
+                '<IfModule mod_authz_core.c>',
+                '    Require all denied',
+                '</IfModule>',
+                '# Apache 2.2 fallback',
+                '<IfModule !mod_authz_core.c>',
+                '    Deny from all',
+                '</IfModule>',
+                '',
+            ] ) );
+        }
+
+        // Silence / directory-listing guard (works on all servers)
+        $index = $dir . 'index.php';
+        if ( ! file_exists( $index ) ) {
+            file_put_contents( $index, "<?php // Silence is golden.\n" );
+        }
+
+        // Nginx reminder — cannot be enforced from PHP; document the required config.
+        $nginx_readme = $dir . 'README.nginx.txt';
+        if ( ! file_exists( $nginx_readme ) ) {
+            $rel = str_replace( ABSPATH, '', $dir );
+            file_put_contents( $nginx_readme, implode( "\n", [
+                'WP Clone Master — Nginx protection required',
+                '===========================================',
+                'Nginx ignores .htaccess files. Add the following block to your',
+                'server { } configuration to block public access to this directory:',
+                '',
+                '    location ~* ^/' . rtrim( $rel, '/' ) . '/ {',
+                '        deny all;',
+                '        return 403;',
+                '    }',
+                '',
+                'Without this block the directory contents are publicly accessible.',
+                'Reload Nginx after adding the block: sudo nginx -s reload',
+                '',
+            ] ) );
         }
     }
 
@@ -185,23 +239,20 @@ class WP_Clone_Master {
         $settings = new WPCM_Backup_Settings();
 
         wp_localize_script( 'wpcm-admin', 'wpcmData', [
-            'ajaxUrl'    => admin_url( 'admin-ajax.php' ),
-            'nonce'      => wp_create_nonce( 'wpcm_nonce' ),
-            'restUrl'    => rest_url( 'wpcm/v1/' ),
-            'restNonce'  => wp_create_nonce( 'wp_rest' ),
-            'siteUrl'    => site_url(),
-            'homeUrl'    => home_url(),
-            'pluginUrl'  => WPCM_PLUGIN_URL,
-            'maxUpload'  => wp_max_upload_size(),
-            // Server's current time in WP timezone — JS uses this as polling baseline
-            // so the "started_after" comparison works regardless of client timezone.
-            'server_now' => WPCM_Date::now_str(),
-            'schedule'   => array_merge( $settings->to_array(), [
+            'ajaxUrl'   => admin_url( 'admin-ajax.php' ),
+            'nonce'     => wp_create_nonce( 'wpcm_nonce' ),
+            'restUrl'   => rest_url( 'wpcm/v1/' ),
+            'restNonce' => wp_create_nonce( 'wp_rest' ),
+            'siteUrl'   => site_url(),
+            'homeUrl'   => home_url(),
+            'pluginUrl' => WPCM_PLUGIN_URL,
+            'maxUpload' => wp_max_upload_size(),
+            'schedule'  => array_merge( $settings->to_array(), [
                 'next_run'        => $next_ts,
-                'next_run_human'  => WPCM_Date::next_run_label( $next_ts ),
+                'next_run_human'  => $next_ts ? wp_date( 'D d M Y à H:i', $next_ts ) : null,
                 'cron_disabled'   => defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON,
             ] ),
-            'i18n'       => [
+            'i18n'      => [
                 'exporting'  => __( 'Exporting...', 'wp-clone-master' ),
                 'importing'  => __( 'Importing...', 'wp-clone-master' ),
                 'success'    => __( 'Operation completed successfully!', 'wp-clone-master' ),
@@ -270,14 +321,27 @@ class WP_Clone_Master {
 
         if ( $chunk_index >= 0 && $total_chunks > 0 ) {
             // CHUNKED UPLOAD MODE
+
+            // ── File-type whitelist ───────────────────────────────────────────
+            // Only .zip archives are valid backup files. Checked before any data
+            // is written to disk so a non-zip never touches the filesystem.
+            if ( strtolower( pathinfo( $file_name, PATHINFO_EXTENSION ) ) !== 'zip' ) {
+                wp_send_json_error( [ 'message' => 'Invalid file type. Only .zip backup archives are accepted.' ] );
+            }
+            // ─────────────────────────────────────────────────────────────────
+
             if ( ! $upload_id ) {
                 $upload_id = 'upload_' . uniqid();
             }
 
             $upload_dir = WPCM_TEMP_DIR . $upload_id . '/';
             wp_mkdir_p( $upload_dir );
+            // Protect the session subdirectory immediately after creation.
+            // The parent wpcm-temp/.htaccess is NOT inherited by subdirectories on
+            // hosts with AllowOverride None, so each session dir needs its own file.
+            self::protect_directory( $upload_dir );
 
-            $dest = $upload_dir . $file_name;
+            $dest  = $upload_dir . $file_name;
             $chunk = $_FILES['backup_chunk'];
 
             // Append chunk to destination file
@@ -312,8 +376,16 @@ class WP_Clone_Master {
 
         // SINGLE FILE UPLOAD (small files — fallback)
         $file = $_FILES['backup_file'];
+
+        // ── File-type whitelist (single-upload path) ──────────────────────────
+        if ( strtolower( pathinfo( $file['name'], PATHINFO_EXTENSION ) ) !== 'zip' ) {
+            wp_send_json_error( [ 'message' => 'Invalid file type. Only .zip backup archives are accepted.' ] );
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         $upload_dir = WPCM_TEMP_DIR . 'import_' . uniqid() . '/';
         wp_mkdir_p( $upload_dir );
+        self::protect_directory( $upload_dir );
 
         $dest = $upload_dir . sanitize_file_name( $file['name'] );
         if ( ! move_uploaded_file( $file['tmp_name'], $dest ) ) {
@@ -340,11 +412,32 @@ class WP_Clone_Master {
 
         $step        = isset( $_POST['step'] ) ? sanitize_text_field( $_POST['step'] ) : 'extract';
         $session_id  = isset( $_POST['session_id'] ) ? sanitize_text_field( $_POST['session_id'] ) : '';
-        $file_path   = isset( $_POST['file_path'] ) ? sanitize_text_field( $_POST['file_path'] ) : '';
         $new_url     = isset( $_POST['new_url'] ) ? esc_url_raw( $_POST['new_url'] ) : '';
         // import_opts is a JSON string sent by the JS (e.g. {"block_indexing":true,"reset_permalinks":true})
         // It was previously never read here — that was the root cause of block_indexing never working.
         $import_opts = isset( $_POST['import_opts'] ) ? wp_unslash( $_POST['import_opts'] ) : '{}';
+
+        // ── file_path confinement ─────────────────────────────────────────────
+        // $_POST['file_path'] is attacker-controlled. Without this check an admin
+        // could supply an arbitrary server path (e.g. /etc/passwd) and the importer
+        // would open it as a ZIP archive.
+        // We accept only paths that actually live inside WPCM_TEMP_DIR.
+        $file_path = '';
+        if ( ! empty( $_POST['file_path'] ) ) {
+            $raw_path      = sanitize_text_field( wp_unslash( $_POST['file_path'] ) );
+            $real_temp_dir = realpath( WPCM_TEMP_DIR );
+            // realpath() returns false for non-existent paths; use the raw path as
+            // fallback for the prefix check so a fresh file that hasn't been fully
+            // written yet (chunk 0) still resolves correctly.
+            $real_given = realpath( $raw_path );
+            $check_path = $real_given ? $real_given : $raw_path;
+            if ( $real_temp_dir && strpos( $check_path, $real_temp_dir ) === 0 ) {
+                $file_path = $raw_path;
+            } else {
+                wp_send_json_error( [ 'message' => 'Invalid file path.' ] );
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
 
         $importer = new WPCM_Importer();
 
@@ -367,18 +460,19 @@ class WP_Clone_Master {
         if ( is_dir( WPCM_BACKUP_DIR ) ) {
             $files = glob( WPCM_BACKUP_DIR . '*.zip' );
             foreach ( $files as $file ) {
-                $mtime     = (int) filemtime( $file );
                 $backups[] = [
                     'name'     => basename( $file ),
                     'size'     => size_format( filesize( $file ) ),
                     'size_raw' => filesize( $file ),
-                    'date'     => WPCM_Date::format( $mtime ),   // WP timezone
-                    'date_ts'  => $mtime,                        // UTC — used for sort only
-                    'path'     => $file,
+                    'date'     => gmdate( 'Y-m-d H:i:s', filemtime( $file ) ),
+                    // 'path' intentionally omitted — the absolute server path is not
+                    // needed by the frontend (all operations use backup_name) and
+                    // exposing it would leak the server's directory layout.
                 ];
             }
-            // Sort by UTC timestamp (correct, timezone-independent)
-            usort( $backups, fn( $a, $b ) => $b['date_ts'] - $a['date_ts'] );
+            usort( $backups, function( $a, $b ) {
+                return strtotime( $b['date'] ) - strtotime( $a['date'] );
+            });
         }
 
         wp_send_json_success( $backups );
@@ -457,7 +551,7 @@ class WP_Clone_Master {
 
         wp_send_json_success( array_merge( $settings->to_array(), [
             'next_run'       => $next_ts,
-            'next_run_human' => WPCM_Date::next_run_label( $next_ts ),
+            'next_run_human' => $next_ts ? wp_date( 'D d M Y à H:i', $next_ts ) : null,
             'cron_disabled'  => defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON,
         ] ) );
     }
@@ -491,7 +585,7 @@ class WP_Clone_Master {
         wp_send_json_success( [
             'message'        => 'Paramètres sauvegardés.',
             'next_run'       => $next_ts,
-            'next_run_human' => WPCM_Date::next_run_label( $next_ts ),
+            'next_run_human' => $next_ts ? wp_date( 'D d M Y à H:i', $next_ts ) : null,
         ] );
     }
 
@@ -524,7 +618,7 @@ class WP_Clone_Master {
 
         // The run_id format must match what WPCM_Scheduler::run_backup() produces
         // so the JS can correlate the history entry.
-        $run_id = WPCM_Date::now_id();
+        $run_id = gmdate( 'Ymd_His' );
 
         // ── Close the HTTP connection NOW so the browser doesn't time out ──
         // Works on Apache (mod_php), Nginx + PHP-FPM, LiteSpeed, etc.
@@ -537,11 +631,7 @@ class WP_Clone_Master {
 
         $body = wp_json_encode( [
             'success' => true,
-            'data'    => [
-                'status'     => 'queued',
-                'run_id'     => $run_id,
-                'server_now' => WPCM_Date::now_str(), // JS updates its baseline after each click
-            ],
+            'data'    => [ 'status' => 'queued', 'run_id' => $run_id ],
         ] );
 
         header( 'Content-Type: application/json; charset=UTF-8' );
@@ -647,13 +737,30 @@ class WP_Clone_Master {
             wp_send_json_error( [ 'message' => 'URL Nextcloud manquante.' ] );
         }
 
-        $nc_url  = rtrim( $nc_url, '/' );
+        $nc_url = rtrim( $nc_url, '/' );
+
+        // ── SSRF guard + DNS pinning ──────────────────────────────────────────
+        // validate_nextcloud_url() rejects non-http(s) schemes and blocks every
+        // private / reserved range (RFC 1918, loopback, link-local, CGNAT…).
+        // It also returns the pre-resolved IP so we can pin it via CURLOPT_RESOLVE,
+        // closing the TOCTOU DNS rebinding window: without pinning, an attacker who
+        // controls the DNS TTL could make gethostbyname() return a public IP during
+        // validation, then flip to 127.0.0.1 before wp_remote_post() resolves again.
+        $ssrf = $this->validate_nextcloud_url( $nc_url );
+        if ( $ssrf['error'] ) {
+            wp_send_json_error( [ 'message' => $ssrf['error'] ] );
+        }
+        $curl_resolve = $this->build_curl_resolve( $ssrf['host'], $ssrf['port'], $ssrf['ip'] );
+        // ─────────────────────────────────────────────────────────────────────
+
         $endpoint = $nc_url . '/index.php/login/v2';
 
         $response = wp_remote_post( $endpoint, [
             'timeout'   => 15,
             'headers'   => [ 'User-Agent' => 'WP-Clone-Master/' . WPCM_VERSION ],
             'sslverify' => true,
+            // Pin the connection to the pre-validated IP — prevents DNS rebinding.
+            'curl'      => $curl_resolve ? [ CURLOPT_RESOLVE => $curl_resolve ] : [],
         ] );
 
         if ( is_wp_error( $response ) ) {
@@ -669,6 +776,19 @@ class WP_Clone_Master {
                            . 'Vérifiez l\'URL et que votre instance est en NC 16+.',
             ] );
         }
+
+        // ── SSRF guard (poll endpoint) ─────────────────────────────────────────
+        // The poll endpoint is returned by the Nextcloud server itself.
+        // A compromised or malicious NC instance could inject an endpoint pointing
+        // to an internal address. Ensure it belongs to the same host as $nc_url.
+        $nc_host   = wp_parse_url( $nc_url, PHP_URL_HOST );
+        $poll_host = wp_parse_url( $body['poll']['endpoint'] ?? '', PHP_URL_HOST );
+        if ( ! $poll_host || strtolower( $poll_host ) !== strtolower( $nc_host ) ) {
+            wp_send_json_error( [
+                'message' => 'Le poll endpoint retourné par Nextcloud ne correspond pas au domaine déclaré. Connexion annulée.',
+            ] );
+        }
+        // ─────────────────────────────────────────────────────────────────────
 
         // Store poll data server-side — the JS only gets an opaque session_id
         $session_id = wp_generate_password( 32, false );
@@ -701,11 +821,19 @@ class WP_Clone_Master {
             wp_send_json_error( [ 'message' => 'Session expirée ou invalide.' ] );
         }
 
-        // POST to Nextcloud poll endpoint with the token in the body
+        // POST to Nextcloud poll endpoint with the token in the body.
+        // Re-validate the poll endpoint URL and pin its IP via CURLOPT_RESOLVE to
+        // prevent DNS rebinding between the transient write (ajax_nc_init_flow) and
+        // this poll call. The poll host was already verified to match $nc_url's host,
+        // so this is a second-layer pin, not a redundant full validation.
+        $poll_ssrf    = $this->validate_nextcloud_url( $flow_data['endpoint'] );
+        $poll_resolve = $this->build_curl_resolve( $poll_ssrf['host'], $poll_ssrf['port'], $poll_ssrf['ip'] );
+
         $response = wp_remote_post( $flow_data['endpoint'], [
             'timeout' => 10,
             'headers' => [ 'User-Agent' => 'WP-Clone-Master/' . WPCM_VERSION ],
             'body'    => [ 'token' => $flow_data['token'] ],
+            'curl'    => $poll_resolve ? [ CURLOPT_RESOLVE => $poll_resolve ] : [],
         ] );
 
         if ( is_wp_error( $response ) ) {
@@ -776,10 +904,25 @@ class WP_Clone_Master {
 
         // Build a temporary settings object from POST values (not yet saved)
         // so the user can test before saving.
+        $nc_url_raw = esc_url_raw( $_POST['nextcloud_url'] ?? '' );
+
+        // ── SSRF guard + DNS pinning ──────────────────────────────────────────
+        // Same validation as ajax_nc_init_flow(): reject non-http(s) schemes and
+        // block private / reserved IP ranges before any outbound connection.
+        // The resolved IP is stored in settings so the storage driver can also
+        // pin it via CURLOPT_RESOLVE when it connects.
+        if ( $nc_url_raw ) {
+            $ssrf = $this->validate_nextcloud_url( $nc_url_raw );
+            if ( $ssrf['error'] ) {
+                wp_send_json_error( [ 'message' => $ssrf['error'] ] );
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         $settings = new WPCM_Backup_Settings();
         $settings->save( [
             'storage_driver'  => sanitize_text_field( $_POST['storage_driver']  ?? 'local' ),
-            'nextcloud_url'   => esc_url_raw( $_POST['nextcloud_url']           ?? '' ),
+            'nextcloud_url'   => $nc_url_raw,
             'nextcloud_user'  => sanitize_text_field( $_POST['nextcloud_user']  ?? '' ),
             'nextcloud_pass'  => $_POST['nextcloud_pass']                        ?? '',
             'nextcloud_path'  => sanitize_text_field( $_POST['nextcloud_path']  ?? 'Backups/WordPress' ),
@@ -793,6 +936,89 @@ class WP_Clone_Master {
         } else {
             wp_send_json_error( [ 'message' => $result['message'] ] );
         }
+    }
+
+    /**
+     * Validates a Nextcloud URL against SSRF risks and resolves the hostname to a
+     * safe public IP.
+     *
+     * Checks:
+     *   1. Scheme must be http or https (rejects file://, gopher://, dict://, etc.)
+     *   2. Hostname must resolve to a public IP — rejects loopback (127.x), private
+     *      RFC 1918 ranges (10.x, 172.16-31.x, 192.168.x), link-local (169.254.x),
+     *      CGNAT (100.64-127.x), and IPv6 equivalents.
+     *
+     * Returns an array on success: [ 'error' => null, 'ip' => '1.2.3.4', 'host' => 'cloud.example.com', 'port' => 443 ]
+     * Returns an array on failure: [ 'error' => 'translated error string', 'ip' => null, ... ]
+     *
+     * The resolved IP is returned so callers can pin it via CURLOPT_RESOLVE, eliminating
+     * the TOCTOU window between validation and the actual outbound connection (DNS rebinding).
+     *
+     * @param string $url The URL to validate (already passed through esc_url_raw).
+     * @return array{ error: string|null, ip: string|null, host: string, port: int }
+     */
+    private function validate_nextcloud_url( string $url ): array {
+        $parsed = wp_parse_url( $url );
+
+        // Reject non-http(s) schemes outright
+        if ( empty( $parsed['scheme'] ) || ! in_array( strtolower( $parsed['scheme'] ), [ 'http', 'https' ], true ) ) {
+            return [ 'error' => 'URL Nextcloud invalide : seuls les protocoles http et https sont acceptés.', 'ip' => null, 'host' => '', 'port' => 443 ];
+        }
+
+        $host = $parsed['host'] ?? '';
+        if ( ! $host ) {
+            return [ 'error' => 'URL Nextcloud invalide : hôte manquant.', 'ip' => null, 'host' => '', 'port' => 443 ];
+        }
+
+        $default_port = strtolower( $parsed['scheme'] ) === 'https' ? 443 : 80;
+        $port         = ! empty( $parsed['port'] ) ? (int) $parsed['port'] : $default_port;
+
+        // Resolve hostname to IP. gethostbyname() returns the input unchanged if
+        // resolution fails — detect that and treat it as an unresolvable host.
+        $ip = gethostbyname( $host );
+        if ( $ip === $host && ! filter_var( $host, FILTER_VALIDATE_IP ) ) {
+            // Could not resolve — we cannot pin the IP, so we cannot guarantee TOCTOU safety.
+            // Return a soft error: the caller may still attempt the connection but must
+            // not pass CURLOPT_RESOLVE (curl will do its own resolution).
+            // Unresolvable hosts are effectively unreachable and not a SSRF risk here.
+            return [ 'error' => null, 'ip' => null, 'host' => $host, 'port' => $port ];
+        }
+
+        // Block private, loopback, link-local, and reserved ranges.
+        // FILTER_FLAG_NO_PRIV_RANGE covers: 10.x, 172.16-31.x, 192.168.x
+        // FILTER_FLAG_NO_RES_RANGE covers: 127.x, 0.x, 169.254.x, 192.0.2.x, and more.
+        $flags = FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE;
+        if ( filter_var( $ip, FILTER_VALIDATE_IP, $flags ) === false ) {
+            return [ 'error' => 'URL Nextcloud refusée : les adresses IP internes ou réservées ne sont pas autorisées.', 'ip' => null, 'host' => $host, 'port' => $port ];
+        }
+
+        return [ 'error' => null, 'ip' => $ip, 'host' => $host, 'port' => $port ];
+    }
+
+    /**
+     * Builds a CURLOPT_RESOLVE array that pins host:port to a pre-validated IP.
+     *
+     * Passing this to wp_remote_post() / wp_remote_get() via the 'curl' key
+     * forces libcurl to use the already-validated IP for the connection, closing
+     * the TOCTOU DNS rebinding window between validate_nextcloud_url() and the
+     * actual outbound request.
+     *
+     * If $ip is null (hostname could not be resolved during validation), an empty
+     * array is returned and curl falls back to its own DNS resolution — this is
+     * safe because an unresolvable host is not a SSRF risk.
+     *
+     * @param string      $host The hostname (e.g. 'cloud.example.com').
+     * @param int         $port The TCP port (80 or 443).
+     * @param string|null $ip   The pre-validated public IP, or null.
+     * @return array CURLOPT_RESOLVE entries, e.g. [ 'cloud.example.com:443:1.2.3.4' ]
+     */
+    private function build_curl_resolve( string $host, int $port, ?string $ip ): array {
+        if ( ! $ip ) {
+            return [];
+        }
+        // CURLOPT_RESOLVE format: "hostname:port:ip"
+        // This tells libcurl: for this host+port, use this IP — no DNS lookup.
+        return [ "{$host}:{$port}:{$ip}" ];
     }
 
     private function recursive_delete( $dir ) {

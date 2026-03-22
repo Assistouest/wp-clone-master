@@ -424,12 +424,25 @@
         const runImport = async () => {
             setPhase('importing'); setError(null);
             try {
+                // ── Generate a cryptographic token client-side ──────────────────────
+                // crypto.getRandomValues() is CSPRNG — never Math.random().
+                // 32 bytes = 256 bits of entropy, encoded as a 64-char hex string.
+                // This token is generated here, kept in memory only, and sent once in
+                // the *request* to step_prepare — never read back from any response.
+                // The server bcrypt-hashes it and bakes the hash into the installer PHP.
+                // The token also serves as the AES-256 key for DB credential encryption.
+                const _rawBytes = new Uint8Array(32);
+                crypto.getRandomValues(_rawBytes);
+                const clientToken = Array.from(_rawBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+
                 log('Préparation de l\'installeur…');
                 const prep = await apiRetry('wpcm_import', {
                     step: 'prepare', session_id: sessionId, file_path: filePath,
                     new_url: newUrl, import_opts: JSON.stringify(opts),
+                    installer_token: clientToken, // sent in request body, never in a response
                 }, MAX_RETRIES, log);
-                const { installer_url: url, auth_token: tok } = prep;
+                // auth_token is intentionally absent from the response — the server never returns it.
+                const { installer_url: url } = prep;
                 log('Installeur prêt.', 'success');
 
                 let step = 'database';
@@ -439,7 +452,7 @@
 
                 while (step) {
                     const fd = new FormData();
-                    fd.append('auth_token', tok); fd.append('step', step);
+                    fd.append('installer_token', clientToken); fd.append('step', step);
                     if (step === 'database') { fd.append('file_index', String(dbIdx)); fd.append('byte_offset', String(dbOff)); fd.append('queries_total', String(dbQ)); fd.append('errors_total', String(dbE)); }
                     if (step === 'replace_urls') { fd.append('table_index', String(srIdx)); fd.append('row_offset', String(srOff)); fd.append('sr_rows', String(srR)); fd.append('sr_cells', String(srC)); fd.append('sr_serial', String(srS)); }
 
@@ -942,12 +955,18 @@
         const runImport = async () => {
             setPhase('importing'); setError(null);
             try {
+                // ── Generate a cryptographic token client-side (same pattern as import tab) ──
+                const _rawBytes = new Uint8Array(32);
+                crypto.getRandomValues(_rawBytes);
+                const clientToken = Array.from(_rawBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+
                 log('Préparation de l\'installeur…');
                 const prep = await apiRetry('wpcm_import', {
                     step: 'prepare', session_id: sessionId, file_path: _backupPath,
                     new_url: newUrl, import_opts: JSON.stringify(opts),
+                    installer_token: clientToken,
                 }, MAX_RETRIES, log);
-                const { installer_url: url, auth_token: tok } = prep;
+                const { installer_url: url } = prep;
                 log('Installeur prêt.', 'success');
 
                 let step = 'database';
@@ -956,7 +975,7 @@
 
                 while (step) {
                     const fd = new FormData();
-                    fd.append('auth_token', tok); fd.append('step', step);
+                    fd.append('installer_token', clientToken); fd.append('step', step);
                     if (step === 'database') { fd.append('file_index', String(dbIdx)); fd.append('byte_offset', String(dbOff)); fd.append('queries_total', String(dbQ)); fd.append('errors_total', String(dbE)); }
                     if (step === 'replace_urls') { fd.append('table_index', String(srIdx)); fd.append('row_offset', String(srOff)); fd.append('sr_rows', String(srR)); fd.append('sr_cells', String(srC)); fd.append('sr_serial', String(srS)); }
 

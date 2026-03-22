@@ -41,14 +41,49 @@ class WPCM_Importer {
             throw new Exception( 'Archive file not found' );
         }
 
-        $session_id  = 'import_' . date( 'Ymd_His' ) . '_' . wp_generate_password( 6, false );
+        $session_id  = 'import_' . gmdate( 'Ymd_His' ) . '_' . wp_generate_password( 16, false );
         $session_dir = WPCM_TEMP_DIR . $session_id . '/';
         wp_mkdir_p( $session_dir );
+        // Protect immediately — the parent wpcm-temp/.htaccess may not propagate
+        // to subdirs on hosts with AllowOverride None.
+        WP_Clone_Master::protect_directory( $session_dir );
 
         $zip = new ZipArchive();
         if ( $zip->open( $file_path ) !== true ) {
             throw new Exception( 'Cannot open ZIP archive' );
         }
+
+        // ── ZIP Slip guard ────────────────────────────────────────────────────
+        // ZipArchive::extractTo() does NOT prevent entries containing '../' from
+        // writing outside $session_dir. A crafted archive could place a PHP file
+        // anywhere on the server. Validate every entry before extraction.
+        $real_session = realpath( $session_dir );
+        if ( ! $real_session ) {
+            $zip->close();
+            throw new Exception( 'Cannot resolve session directory path.' );
+        }
+        for ( $i = 0; $i < $zip->numFiles; $i++ ) {
+            $entry_name = $zip->getNameIndex( $i );
+            // Resolve the prospective destination path; use a fake root so
+            // realpath() does not require the path to exist yet.
+            $dest_path = $real_session . '/' . $entry_name;
+            // Normalise manually: collapse every '..' segment
+            $parts  = [];
+            foreach ( explode( '/', str_replace( '\\', '/', $dest_path ) ) as $part ) {
+                if ( $part === '..' ) {
+                    array_pop( $parts );
+                } elseif ( $part !== '.' && $part !== '' ) {
+                    $parts[] = $part;
+                }
+            }
+            $normalised = '/' . implode( '/', $parts );
+            if ( strpos( $normalised, $real_session ) !== 0 ) {
+                $zip->close();
+                throw new Exception( 'Invalid archive: path traversal detected in entry "' . esc_html( $entry_name ) . '".' );
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         $zip->extractTo( $session_dir );
         $zip->close();
 
@@ -87,24 +122,91 @@ class WPCM_Importer {
 
         $manifest = json_decode( file_get_contents( $this->find_manifest( $session_dir ) ), true );
 
-        // Generate a secure token for the installer
-        $auth_token = wp_generate_password( 48, false );
+        // ── Client-generated token (zero-knowledge pattern) ──────────────────────
+        // The browser generates a cryptographically random 256-bit token via
+        // crypto.getRandomValues() and sends it in the *request* body only once.
+        // We never generate it server-side and never return it in any response,
+        // so it never appears in DevTools response tabs, proxy logs, or XSS leaks.
+        //
+        // The token serves two purposes simultaneously:
+        //   1. Authentication  → bcrypt hash baked into the installer PHP file.
+        //                        Even if installer.php is read from disk, the hash
+        //                        cannot be reversed without the original token.
+        //   2. AES-256 key     → SHA-256(token) encrypts DB credentials in
+        //                        installer_config.json. Both files + the original
+        //                        token are required to recover DB credentials.
+        $client_token = isset( $_POST['installer_token'] )
+            ? sanitize_text_field( wp_unslash( $_POST['installer_token'] ) )
+            : '';
+
+        if ( strlen( $client_token ) < 32 ) {
+            throw new Exception( 'Missing or invalid installer token (must be ≥ 32 chars).' );
+        }
+
+        // bcrypt hash (work factor 10, ~80 ms) — baked into installer.php.
+        // password_verify() is the only way in; brute-force is computationally infeasible.
+        $token_hash = password_hash( $client_token, PASSWORD_BCRYPT, [ 'cost' => 10 ] );
+        if ( $token_hash === false ) {
+            throw new Exception( 'bcrypt hashing failed — check PHP bcrypt support.' );
+        }
+
+        // Installer TTL: 15 minutes from now.
+        // The installer auto-deletes itself if called after this timestamp.
+        $expires_at = time() + ( 15 * MINUTE_IN_SECONDS );
+
+        // Encrypt DB credentials with AES-256-CBC.
+        // Key = SHA-256 of the client token (32 bytes). IV = random 16 bytes.
+        // installer_config.json holds only the encrypted blob — useless without the token.
+        // installer.php holds only the bcrypt hash — useless without the token.
+        // An attacker must compromise both files AND intercept the token to recover creds.
+        $enc_key  = hash( 'sha256', $client_token, true ); // 32-byte AES key
+        // random_bytes() is the preferred CSPRNG since PHP 7.0 (reads from the OS
+        // entropy pool: getrandom() on Linux, CryptGenRandom on Windows).
+        // openssl_random_pseudo_bytes() is kept as a fallback for PHP < 7.0 only —
+        // on some platforms its second $strong parameter can silently be false.
+        $enc_iv   = function_exists( 'random_bytes' )
+            ? random_bytes( 16 )
+            : openssl_random_pseudo_bytes( 16 );
+        $db_plain = wp_json_encode( [
+            'db_host'    => DB_HOST,
+            'db_name'    => DB_NAME,
+            'db_user'    => DB_USER,
+            'db_pass'    => DB_PASSWORD,
+            'db_charset' => defined( 'DB_CHARSET' ) ? DB_CHARSET : 'utf8mb4',
+        ] );
+        $db_cipher = function_exists( 'openssl_encrypt' )
+            ? openssl_encrypt( $db_plain, 'AES-256-CBC', $enc_key, OPENSSL_RAW_DATA, $enc_iv )
+            : false;
+        // Graceful degradation: if openssl is absent, store an empty placeholder.
+        // db_connect() in the installer will call die_json() when decryption fails.
+        $db_credentials_enc = $db_cipher !== false
+            ? base64_encode( $enc_iv . $db_cipher )
+            : '';
+
+        // Canonical admin origin for CORS whitelist (baked at generation time,
+        // never reflected from the request — prevents CORS wildcard exploitation).
+        $admin_origin = rtrim( admin_url(), '/' );
+        // Strip path component: keep scheme + host only (e.g. https://example.com)
+        $parsed_origin = wp_parse_url( $admin_origin );
+        $safe_origin   = ( $parsed_origin['scheme'] ?? 'https' ) . '://' . ( $parsed_origin['host'] ?? '' );
+        if ( ! empty( $parsed_origin['port'] ) ) {
+            $safe_origin .= ':' . $parsed_origin['port'];
+        }
 
         // Collect all info the installer needs
         $installer_config = [
-            'auth_token'     => $auth_token,
-            'session_dir'    => $session_dir,
-            'old_url'        => $manifest['site_url'] ?? '',
-            'old_home'       => $manifest['home_url'] ?? '',
-            'new_url'        => $new_url ?: site_url(),
-            'old_path'       => $manifest['abspath'] ?? '',
-            'new_path'       => ABSPATH,
-            'old_prefix'     => $manifest['db_prefix'] ?? 'wp_',
-            'db_host'        => DB_HOST,
-            'db_name'        => DB_NAME,
-            'db_user'        => DB_USER,
-            'db_pass'        => DB_PASSWORD,
-            'db_charset'     => defined( 'DB_CHARSET' ) ? DB_CHARSET : 'utf8mb4',
+            // TOKEN_HASH is intentionally NOT stored here — it lives only in the
+            // installer PHP file. Excluding it from installer_config.json means
+            // the JSON blob alone cannot authenticate or decrypt db_credentials_enc.
+            'session_dir'        => $session_dir,
+            'old_url'            => $manifest['site_url'] ?? '',
+            'old_home'           => $manifest['home_url'] ?? '',
+            'new_url'            => $new_url ?: site_url(),
+            'old_path'           => $manifest['abspath'] ?? '',
+            'new_path'           => ABSPATH,
+            'old_prefix'         => $manifest['db_prefix'] ?? 'wp_',
+            'db_credentials_enc' => $db_credentials_enc,
+            'db_charset'         => defined( 'DB_CHARSET' ) ? DB_CHARSET : 'utf8mb4',
             'table_prefix'   => $GLOBALS['wpdb']->prefix,
             'wp_content_dir' => WP_CONTENT_DIR,
             'theme_root'     => get_theme_root(),
@@ -127,10 +229,17 @@ class WPCM_Importer {
             wp_json_encode( $installer_config, JSON_PRETTY_PRINT )
         );
 
-        // Generate the standalone installer PHP file in WordPress root
-        $installer_filename = 'wpcm-installer-' . substr( $auth_token, 0, 12 ) . '.php';
-        $installer_path = ABSPATH . $installer_filename;
-        $installer_code = $this->generate_installer_code( $session_dir, $auth_token );
+        // Generate the standalone installer PHP file in WordPress root.
+        // Filename: 24 random chars — URL obscurity as defence-in-depth.
+        // The real authentication is bcrypt, not the filename.
+        $installer_filename = 'wpcm-' . wp_generate_password( 24, false ) . '.php';
+        $installer_path     = ABSPATH . $installer_filename;
+        $installer_code     = $this->generate_installer_code(
+            $session_dir,
+            $token_hash,
+            $expires_at,
+            $safe_origin
+        );
 
         file_put_contents( $installer_path, $installer_code );
 
@@ -140,11 +249,12 @@ class WPCM_Importer {
 
         $installer_url = site_url( '/' . $installer_filename );
 
+        // auth_token is intentionally absent from this response.
+        // The browser already holds the token it generated — it never needs to read it back.
         return [
             'session_id'    => $session_id,
             'installer_url' => $installer_url,
-            'auth_token'    => $auth_token,
-            'next_step'     => null,  // JS will now talk to the installer directly
+            'next_step'     => null,
             'progress'      => 20,
             'message'       => 'Standalone installer ready. Starting import...',
         ];
@@ -153,30 +263,46 @@ class WPCM_Importer {
     /**
      * Generate the standalone installer PHP code
      */
-    private function generate_installer_code( $session_dir, $auth_token ) {
+    private function generate_installer_code( $session_dir, $token_hash, $expires_at, $safe_origin ) {
         $session_dir_escaped = addslashes( $session_dir );
-        $auth_token_escaped  = addslashes( $auth_token );
+        $token_hash_escaped  = addslashes( $token_hash );
+        $safe_origin_escaped = addslashes( $safe_origin );
 
         $installer_code = <<<'INSTALLER_PHP'
 <?php
 /**
  * WP Clone Master — Standalone Installer
  * This file runs OUTSIDE of WordPress to avoid session/nonce issues.
- * It self-destructs after completion.
+ * Authentication: bcrypt password_verify() — token generated client-side,
+ * never stored or returned in any HTTP response by the WP plugin.
+ * It self-destructs after successful completion, TTL expiry, or unrecoverable error.
  */
 error_reporting( E_ALL & ~E_NOTICE & ~E_WARNING & ~E_DEPRECATED );
 @set_time_limit( 0 );
 @ini_set( 'memory_limit', '512M' );
 
+// ── Self-destruct helper ──────────────────────────────────────────────────────
+// Called on TTL expiry, auth failure after max attempts, and unrecoverable errors.
+// Removes this installer file so it cannot be probed after a failure.
+function self_destruct( $reason = '' ) {
+    @unlink( __FILE__ );
+    if ( ! headers_sent() ) {
+        header( 'Content-Type: application/json; charset=utf-8' );
+    }
+    http_response_code( 410 );
+    ob_end_clean();
+    echo json_encode( [ 'success' => false, 'data' => [ 'message' => $reason ?: 'Installer expired or terminated.' ] ] );
+    exit;
+}
+
 // ── Fatal-error safety net (Duplicator DUPX_Handler pattern) ──────────────────
 // register_shutdown_function fires on ANY PHP termination: normal exit, die(),
 // AND E_ERROR (max_execution_time exceeded, memory exhausted, parse error).
 // try/catch does NOT catch E_ERROR — only this shutdown hook can.
-// Without it, a fatal error inside ob_start() produces an empty HTTP body.
+// On fatal error: output clean JSON and self-destruct so no broken file lingers.
 register_shutdown_function( function() {
     $err = error_get_last();
     if ( $err && in_array( $err['type'], [ E_ERROR, E_PARSE, E_COMPILE_ERROR, E_CORE_ERROR ], true ) ) {
-        // Discard any buffered output that would corrupt the JSON
         while ( ob_get_level() > 0 ) { ob_end_clean(); }
         if ( ! headers_sent() ) {
             header( 'Content-Type: application/json; charset=utf-8' );
@@ -184,6 +310,9 @@ register_shutdown_function( function() {
         $msg = $err['message'];
         if ( stripos( $msg, 'execution time' ) !== false ) $msg = 'PHP max_execution_time exceeded. Chunk is too large — retrying will resume from here.';
         elseif ( stripos( $msg, 'memory' ) !== false )     $msg = 'PHP out of memory. Try increasing memory_limit in php.ini or .htaccess.';
+        // Self-destruct on unrecoverable fatal (not on timeout — JS will resume)
+        $is_timeout = stripos( $err['message'], 'execution time' ) !== false;
+        if ( ! $is_timeout ) { @unlink( __FILE__ ); }
         echo json_encode( [ 'success' => false, 'data' => [ 'message' => '[FATAL] ' . $msg ] ] );
     }
 } );
@@ -196,20 +325,40 @@ ob_start();
 // Configuration (injected at generation time)
 // ============================================================
 INSTALLER_PHP
-        . "\n\$SESSION_DIR = '" . $session_dir_escaped . "';\n"
-        . "\$AUTH_TOKEN  = '" . $auth_token_escaped . "';\n"
+        . "\n\$SESSION_DIR  = '" . $session_dir_escaped . "';\n"
+        . "\$TOKEN_HASH   = '" . $token_hash_escaped . "'; // bcrypt — cannot be reversed\n"
+        . "\$EXPIRES_AT   = " . (int) $expires_at . "; // Unix timestamp — 15 min TTL\n"
+        . "\$ALLOWED_ORIGIN = '" . $safe_origin_escaped . "'; // hardcoded at generation time\n"
         . <<<'INSTALLER_BODY'
 
 // ============================================================
-// CORS + Headers (required: JS fetch from WP admin origin)
+// TTL check — before anything else, including CORS headers
 // ============================================================
-$origin = $_SERVER['HTTP_ORIGIN'] ?? '*';
-header( 'Access-Control-Allow-Origin: ' . $origin );
+if ( time() > $EXPIRES_AT ) {
+    self_destruct( 'Installer TTL expired (15 min). Please restart the import process.' );
+}
+
+// ============================================================
+// CORS — origin whitelist (NOT reflected from request)
+// ============================================================
+$request_origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+// Allow only the exact WP admin origin baked at generation time.
+// Prevents cross-origin exploitation even if the installer URL leaks.
+// Non-browser clients (curl, wp-cron) send no Origin header — allow those through.
+if ( $request_origin !== '' && $request_origin !== $ALLOWED_ORIGIN ) {
+    http_response_code( 403 );
+    ob_end_clean();
+    echo json_encode( [ 'success' => false, 'data' => [ 'message' => 'Origin not allowed.' ] ] );
+    exit;
+}
+header( 'Access-Control-Allow-Origin: ' . $ALLOWED_ORIGIN );
 header( 'Access-Control-Allow-Methods: POST, OPTIONS' );
 header( 'Access-Control-Allow-Headers: Content-Type' );
 header( 'Access-Control-Allow-Credentials: true' );
 header( 'Content-Type: application/json; charset=utf-8' );
 header( 'X-Content-Type-Options: nosniff' );
+header( 'X-Frame-Options: DENY' );
+header( 'Referrer-Policy: no-referrer' );
 
 // Handle CORS preflight
 if ( ( $_SERVER['REQUEST_METHOD'] ?? '' ) === 'OPTIONS' ) {
@@ -218,25 +367,58 @@ if ( ( $_SERVER['REQUEST_METHOD'] ?? '' ) === 'OPTIONS' ) {
 }
 
 // ============================================================
-// Authentication
+// Authentication — bcrypt password_verify()
 // ============================================================
-$input_token = $_POST['auth_token'] ?? $_GET['auth_token'] ?? '';
-if ( ! $input_token || ! hash_equals( $AUTH_TOKEN, $input_token ) ) {
-    http_response_code( 403 );
-    ob_end_clean();
-    echo json_encode( [ 'success' => false, 'data' => [ 'message' => 'Unauthorized' ] ] );
-    exit;
+// The browser generated this token with crypto.getRandomValues().
+// It was sent once in the *request* to step_prepare (never in a response).
+// The WP plugin stored only bcrypt_hash(token) here — not the token itself.
+// password_verify() is the only valid path in; the hash cannot be reversed.
+$input_token = $_POST['installer_token'] ?? '';
+if ( ! $input_token || ! password_verify( $input_token, $TOKEN_HASH ) ) {
+    // Wrong token → self-destruct immediately.
+    // An attacker who found the URL gets exactly one attempt before the file disappears.
+    self_destruct( 'Unauthorized.' );
 }
 
 // Load config
 $config_path = $SESSION_DIR . 'installer_config.json';
 if ( ! file_exists( $config_path ) ) {
-    die_json( 'Installer config not found at: ' . $config_path );
+    self_destruct( 'Installer config not found at: ' . $config_path );
 }
 $CFG = json_decode( file_get_contents( $config_path ), true );
 if ( ! $CFG ) {
-    die_json( 'Invalid installer config' );
+    self_destruct( 'Invalid installer config.' );
 }
+
+// ── Decrypt DB credentials ────────────────────────────────────────────────────
+// Credentials were encrypted in class-importer.php with AES-256-CBC.
+// Key = SHA-256 of the client token — same token the browser just sent in $input_token.
+// The token is the only thing that connects the bcrypt hash (installer.php)
+// and the AES-encrypted blob (installer_config.json).
+if ( empty( $CFG['db_credentials_enc'] ) ) {
+    self_destruct( 'Database credentials missing or not encrypted. Regenerate the installer.' );
+}
+if ( ! function_exists( 'openssl_decrypt' ) ) {
+    self_destruct( 'PHP openssl extension is required to decrypt database credentials.' );
+}
+$_enc_raw = base64_decode( $CFG['db_credentials_enc'] );
+$_enc_iv  = substr( $_enc_raw, 0, 16 );
+$_enc_ct  = substr( $_enc_raw, 16 );
+$_enc_key = hash( 'sha256', $input_token, true ); // derive AES key from the verified token
+$_plain   = openssl_decrypt( $_enc_ct, 'AES-256-CBC', $_enc_key, OPENSSL_RAW_DATA, $_enc_iv );
+if ( $_plain === false ) {
+    self_destruct( 'Failed to decrypt database credentials. The installer may be corrupted.' );
+}
+$_db_creds = json_decode( $_plain, true );
+if ( ! $_db_creds || empty( $_db_creds['db_host'] ) ) {
+    self_destruct( 'Invalid decrypted database credentials format.' );
+}
+$CFG['db_host'] = $_db_creds['db_host'];
+$CFG['db_name'] = $_db_creds['db_name'];
+$CFG['db_user'] = $_db_creds['db_user'];
+$CFG['db_pass'] = $_db_creds['db_pass'];
+unset( $CFG['db_credentials_enc'], $_enc_raw, $_enc_iv, $_enc_ct, $_enc_key, $_plain, $_db_creds );
+// ─────────────────────────────────────────────────────────────────────────────
 
 $step = $_POST['step'] ?? 'database';
 
@@ -262,12 +444,15 @@ try {
         case 'files':        $result = step_files( $CFG, $SESSION_DIR ); break;
         case 'replace_urls': $result = step_replace_urls( $CFG ); break;
         case 'finalize':     $result = step_finalize( $CFG, $SESSION_DIR ); break;
-        default:             die_json( 'Unknown step: ' . $step );
+        default:             self_destruct( 'Unknown step: ' . htmlspecialchars( $step, ENT_QUOTES ) );
     }
     ob_end_clean();
     echo json_encode( [ 'success' => true, 'data' => $result ] );
 } catch ( Exception $e ) {
+    // Unrecoverable exception → clean JSON response + self-destruct.
+    // The import UI will show the error message; the file won't linger.
     ob_end_clean();
+    @unlink( __FILE__ );
     echo json_encode( [ 'success' => false, 'data' => [ 'message' => $e->getMessage() ] ] );
 }
 exit;
@@ -714,6 +899,29 @@ function step_files( $CFG, $SESSION_DIR ) {
         // Extract to temp then copy to destination
         $temp = $SESSION_DIR . 'ext_' . md5( $zip_path ) . '/';
         @mkdir( $temp, 0755, true );
+
+        // ── ZIP Slip guard ────────────────────────────────────────────────────
+        // Same defence-in-depth as step_extract: validate every entry before
+        // extraction so a crafted archive cannot escape the temp directory.
+        $real_temp = $temp; // temp was just mkdir'd; normalise manually
+        for ( $zi = 0; $zi < $zip->numFiles; $zi++ ) {
+            $ze_name = $zip->getNameIndex( $zi );
+            $ze_dest = $real_temp . $ze_name;
+            $ze_parts = [];
+            foreach ( explode( '/', str_replace( '\\', '/', $ze_dest ) ) as $zp ) {
+                if ( $zp === '..' ) { array_pop( $ze_parts ); }
+                elseif ( $zp !== '.' && $zp !== '' ) { $ze_parts[] = $zp; }
+            }
+            $ze_norm = '/' . implode( '/', $ze_parts );
+            // real_temp ends with '/', normalise it for prefix comparison
+            $real_temp_check = '/' . implode( '/', array_filter( explode( '/', str_replace( '\\', '/', $real_temp ) ) ) );
+            if ( strpos( $ze_norm, $real_temp_check ) !== 0 ) {
+                $zip->close();
+                continue 2; // skip this entire archive — skip the foreach($zip_files)
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         $zip->extractTo( $temp );
         $zip->close();
 
@@ -1051,48 +1259,32 @@ function step_finalize( $CFG, $SESSION_DIR ) {
         $mysqli->query( "DELETE FROM `{$prefix}options` WHERE option_name LIKE 'w3tc\_%'" );
 
 
-        // ── Restore WordPress drop-in files from their plugin sources ───────────
-        // Drop-in files (object-cache.php, advanced-cache.php…) live in wp-content/
-        // and are installed by cache plugins when you enable their features.
-        // After a migration wipe, these files are gone. The plugins do NOT recreate
-        // them automatically — they require manual action in the plugin UI.
+        // ── DELETE cache drop-in files (Duplicator / AI1WM approach) ─────────
+        // Drop-in files like object-cache.php and advanced-cache.php are
+        // DYNAMICALLY GENERATED by cache plugins (LiteSpeed, W3TC, WP Rocket,
+        // Redis Object Cache…). They contain hardcoded absolute paths
+        // (e.g. LSCWP_DIR = '/home/old-server/…/plugins/litespeed-cache/')
+        // that break after migration.
         //
-        // Fix: after step_files restores all plugin files, copy the drop-in templates
-        // back to wp-content/ from the plugin's own data directory.
-        // This mirrors what cPanel's "WordPress Toolkit" migration does.
+        // These are NOT static templates — copying from the plugin's data/
+        // directory does NOT work because the plugin regenerates them with
+        // server-specific paths via methods like Object_Cache::update_file().
         //
-        // Known drop-in sources:
-        //   LiteSpeed Cache   → litespeed-cache/data/object-cache.php
-        //   W3 Total Cache    → w3-total-cache/PgCache_WpObjectCache.php (different name)
-        //   Redis Object Cache → redis-cache/includes/object-cache.php
-        //   WP Fastest Cache  → (no object-cache drop-in, skip)
+        // The industry-standard solution (Duplicator, AI1WM, WP Toolkit) is:
+        //   1. DELETE object-cache.php and advanced-cache.php after migration
+        //   2. Let the cache plugin auto-regenerate them on first admin visit
+        //
+        // LiteSpeed Cache: regenerates object-cache.php via Activation::update_files()
+        //                  which runs on every admin page load
+        // W3 Total Cache:  regenerates on activation/settings save
+        // Redis OC:        regenerates on activation
+        // WP Rocket:       regenerates advanced-cache.php on activation
         $wc  = rtrim( $CFG['wp_content_dir'], '/' );
-        $plg = rtrim( $CFG['plugin_dir'],     '/' );
-
-        $dropin_sources = [
-            // [ destination, source_in_plugin ]
-            'object-cache.php'   => [
-                $plg . '/litespeed-cache/data/object-cache.php',
-                $plg . '/redis-cache/includes/object-cache.php',
-                $plg . '/w3-total-cache/PgCache_WpObjectCache_ObjectCache.php',
-            ],
-            'advanced-cache.php' => [
-                $plg . '/litespeed-cache/data/advanced-cache.php',
-                $plg . '/w3-total-cache/advanced-cache.php',
-                $plg . '/wp-rocket/inc/classes/subscriber/Cache/class-advanced-cache-subscriber.php',
-            ],
-        ];
-
-        foreach ( $dropin_sources as $dropin_name => $candidates ) {
-            $dest = $wc . '/' . $dropin_name;
-            // Only restore if the drop-in is currently missing
-            if ( ! file_exists( $dest ) ) {
-                foreach ( $candidates as $src ) {
-                    if ( file_exists( $src ) ) {
-                        @copy( $src, $dest );
-                        break;
-                    }
-                }
+        $cache_dropins = [ 'object-cache.php', 'advanced-cache.php' ];
+        foreach ( $cache_dropins as $dropin_name ) {
+            $dropin_path = $wc . '/' . $dropin_name;
+            if ( file_exists( $dropin_path ) ) {
+                @unlink( $dropin_path );
             }
         }
 

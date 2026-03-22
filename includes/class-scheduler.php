@@ -79,7 +79,7 @@ class WPCM_Scheduler {
         }
 
         // Start time: next round hour in the future
-        $start = WPCM_Date::next_round_hour_utc();
+        $start = strtotime( 'next hour' );
 
         wp_schedule_event( $start, $frequency, self::CRON_HOOK );
     }
@@ -127,8 +127,8 @@ class WPCM_Scheduler {
         @set_time_limit( 0 );
         @ini_set( 'memory_limit', '512M' );
 
-        $run_id     = WPCM_Date::now_id();
-        $started_at = WPCM_Date::now_str();
+        $run_id     = date( 'Ymd_His' );
+        $started_at = date( 'Y-m-d H:i:s' );
         $start_ts   = microtime( true );
 
         $entry = [
@@ -179,7 +179,7 @@ class WPCM_Scheduler {
             $entry['status']       = 'success';
             $entry['filename']     = $original_name;
             $entry['size_bytes']   = $size_bytes;
-            $entry['finished_at']  = WPCM_Date::now_str();
+            $entry['finished_at']  = date( 'Y-m-d H:i:s' );
             $entry['duration_sec'] = (int) ( microtime( true ) - $start_ts );
 
             // ── Storage driver upload ─────────────────────────────────────────
@@ -214,7 +214,7 @@ class WPCM_Scheduler {
         } catch ( \Throwable $e ) {
             $entry['status']       = 'error';
             $entry['error']        = $e->getMessage();
-            $entry['finished_at']  = WPCM_Date::now_str();
+            $entry['finished_at']  = date( 'Y-m-d H:i:s' );
             $entry['duration_sec'] = (int) ( microtime( true ) - $start_ts );
 
             $this->send_notification( $entry );
@@ -256,9 +256,8 @@ class WPCM_Scheduler {
             $to_delete = array_slice( $auto_files, $keep );
 
         } elseif ( $mode === 'days' ) {
-            $days    = max( 1, (int) $s->retention_days );
-            // time() and filemtime() both return UTC timestamps — comparison is timezone-safe
-            $cutoff  = WPCM_Date::utc_now() - ( $days * DAY_IN_SECONDS );
+            $days     = max( 1, (int) $s->retention_days );
+            $cutoff   = time() - ( $days * DAY_IN_SECONDS );
             $to_delete = array_filter( $auto_files, fn( $f ) => filemtime( $f ) < $cutoff );
 
         } else {

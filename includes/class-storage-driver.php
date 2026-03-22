@@ -352,7 +352,7 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
 
         $base      = rtrim( (string) $this->settings->nextcloud_url, '/' );
         $user      = rawurlencode( (string) $this->settings->nextcloud_user );
-        $upload_id = 'wpcm_' . wp_generate_password( 16, false ) . '_' . WPCM_Date::utc_now();
+        $upload_id = 'wpcm_' . wp_generate_password( 16, false ) . '_' . time();
 
         $uploads_base = $base . '/remote.php/dav/uploads/' . $user . '/';
         $session_url  = $uploads_base . rawurlencode( $upload_id ) . '/';
