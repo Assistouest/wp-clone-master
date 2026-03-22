@@ -26,7 +26,7 @@ Le plugin a été conçu pour ignorer les barrières de taille. Que votre site p
 Parce qu'une migration WordPress expose l'intégralité de vos données ( bases de données, transactions et configurations serveurs) nous avons refusé tout compromis sur la sécurité. WP Clone Master déploie un véritable protocole de transfert sécurisé, conçu pour neutraliser les vecteurs d'attaque les plus sophistiqués. Cette rigueur technique a été validée par un audit indépendant, attribuant à notre architecture la note exceptionnelle de 9.2/10, surpassant largement les standards des solutions payantes actuelles.
 
 
-Pour parer aux risques d'exploitation post-migration, nous avons intégré des mécanismes de défense actifs, tels qu'un installeur auto-destructible. Une fois l'importation finalisée, après un court délai d'inactivité ou une erreur, le script s'efface de lui-même.
+Pour parer aux risques d'exploitation post-migration, nous avons intégré un installeur auto-destructible. Une fois l'importation finalisée, après un court délai d'inactivité ou une erreur, le script s'efface de lui-même.
 
 ---
 
