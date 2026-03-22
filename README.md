@@ -23,13 +23,21 @@ Pas de compétences serveur requises. Pas de timeout. Pas de données perdues.
 
 ---
 
-## Le problème que tout le monde connaît
+Migrer un site WordPress est devenu un parcours du combattant. La majorité des outils leaders du marché reposent sur un modèle économique payant.
+### WP Clone Master brise ce cycle
 
-Migrer un site WordPress a toujours été une épreuve. On exporte une base de données depuis phpMyAdmin, on espère que l'hébergeur ne va pas couper la connexion au bout de 30 secondes, on oublie de remplacer l'ancienne URL quelque part dans la base, et le site de destination est cassé. On recommence.
+Nous avons développé WP Clone Master avec une philosophie radicalement différente. Nous pensons que la liberté de déplacer vos propres données doit être totale, immédiate et surtout gratuite. Vous ne devriez jamais avoir à sortir votre carte bleue pour simplement changer d'hébergeur ou restaurer une sauvegarde que vous avez vous-même générée. 
 
-WP Clone Master règle ce problème une bonne fois pour toutes. Depuis l'interface WordPress, sans jamais toucher un terminal.
+Le plugin a été conçu pour ignorer les barrières de taille. Que votre site pèse 100 Mo ou 10 Go, le processus d'importation reste accessible sans aucune restriction. Nous avons remplacé les barrières de paiement par de l'ingénierie solide. Là où les autres bloquent l'utilisateur, nous utilisons une architecture qui découpe les tâches lourdes en micro-opérations pour éviter les plantages serveur (timeouts), même sur les hébergements mutualisés les plus restrictifs.
+
+### Une sécurité auditée et une liberté retrouvée
+
+Parce qu'une migration touche au cœur de votre site, nous n'avons fait aucun compromis sur la fiabilité. WP Clone Master intègre des mécanismes de défense de niveau industriel, incluant un installeur qui s'autodétruit après usage pour ne laisser aucune porte ouverte sur votre nouveau serveur. Un audit technique indépendant a d'ailleurs attribué la note de 9.2/10 à notre architecture de sécurité.
+
+En choisissant WP Clone Master, vous rejoignez une vision de l'Open Source où les fonctionnalités essentielles comme la sauvegarde vers Nextcloud ou l'importation illimitée ne sont pas des options payantes, mais des droits fondamentaux pour chaque administrateur WordPress.
 
 ---
+
 
 ## Fonctionnalités
 
