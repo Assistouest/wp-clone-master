@@ -38,17 +38,6 @@ Pour parer aux risques d'exploitation post-migration, nous avons intégré des m
 
 ---
 
-
-## Fonctionnalités
-
-**Clonage et migration complets**
-
-WP Clone Master exporte l'intégralité de votre site — base de données, thèmes, plugins, médias, fichiers de configuration — dans une seule archive ZIP. Importez-la sur n'importe quel hébergement en quelques minutes. Les URLs de l'ancien domaine sont remplacées automatiquement partout dans la base, y compris dans les données sérialisées qu'Elementor, WooCommerce ou WPML enfouissent au plus profond de vos tables.
-
-**Sauvegardes automatiques planifiées**
-
-Configurez une sauvegarde quotidienne, hebdomadaire ou mensuelle et oubliez-y. En cas d'échec vous recevez un email. En cas de succès aussi, si vous le souhaitez. Les anciennes sauvegardes sont supprimées automatiquement selon la politique de rétention que vous définissez — par nombre ou par ancienneté.
-
 **Stockage local ou Nextcloud**
 
 Gardez vos sauvegardes sur le serveur, ou envoyez-les automatiquement vers votre instance Nextcloud après chaque backup. Les fichiers volumineux sont envoyés par morceaux, sans jamais saturer la mémoire ni dépasser les limites de votre hébergeur.
