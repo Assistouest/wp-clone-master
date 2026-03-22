@@ -53,37 +53,9 @@ Configurez une sauvegarde quotidienne, hebdomadaire ou mensuelle et oubliez-y. E
 Gardez vos sauvegardes sur le serveur, ou envoyez-les automatiquement vers votre instance Nextcloud après chaque backup. Les fichiers volumineux sont envoyés par morceaux, sans jamais saturer la mémoire ni dépasser les limites de votre hébergeur.
 
 
-## Diagnostic serveur intégré
-
-Avant de lancer une migration, consultez le tableau de bord de diagnostic. Il affiche en un coup d'oeil tout ce qui peut influencer le bon déroulement d'une sauvegarde : version PHP, limites mémoire, espace disque disponible, extensions installées, droits d'écriture sur les répertoires. Si quelque chose risque de poser problème, vous le savez avant de commencer.
-
 ---
 
-## Démarrer
 
-**Installation**
-
-Téléchargez le ZIP depuis la page [Releases](../../releases), puis dans WordPress :
-
-```
-Extensions > Ajouter > Téléverser une extension
-```
-
-Activez le plugin. Le menu **Clone Master** apparaît dans la barre latérale.
-
-**Première sauvegarde**
-
-Rendez-vous dans l'onglet **Planification**, activez les sauvegardes automatiques, choisissez la fréquence et enregistrez. La première sauvegarde se déclenchera à la prochaine heure ronde.
-
-Pour une sauvegarde immédiate, cliquez sur **Sauvegarder maintenant** — le plugin ferme la connexion HTTP en moins d'une seconde et continue le travail en arrière-plan. Rafraîchissez l'historique pour suivre l'avancement.
-
-**Première migration**
-
-Depuis l'onglet **Export**, lancez l'export de votre site source. Une fois le ZIP téléchargé, rendez-vous sur le site de destination et utilisez l'onglet **Import** pour téléverser l'archive et démarrer la migration.
-
----
-
- 
 Si WP Clone Master vous a économisé du temps, vous pouvez soutenir le développement ici :
  
 <a href="https://buymeacoffee.com/assistouest">
