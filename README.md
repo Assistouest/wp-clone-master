@@ -26,7 +26,7 @@ Pas de compétences serveur requises. Pas de timeout. Pas de données perdues.
 Migrer un site WordPress est devenu un parcours du combattant. La majorité des outils leaders du marché reposent sur un modèle économique payant.
 ### WP Clone Master brise ce cycle
 
-Nous avons développé WP Clone Master avec une philosophie radicalement différente. Nous pensons que la liberté de déplacer vos propres données doit être totale, immédiate et surtout gratuite. Vous ne devriez jamais avoir à sortir votre carte bleue pour simplement changer d'hébergeur ou restaurer une sauvegarde que vous avez vous-même générée. 
+Nous pensons que la liberté de déplacer vos propres données doit être totale, immédiate et surtout gratuite. Vous ne devriez jamais avoir à sortir votre carte bleue pour simplement changer d'hébergeur ou restaurer une sauvegarde que vous avez vous-même générée. 
 
 Le plugin a été conçu pour ignorer les barrières de taille. Que votre site pèse 100 Mo ou 10 Go, le processus d'importation reste accessible sans aucune restriction. Nous avons remplacé les barrières de paiement par de l'ingénierie solide. Là où les autres bloquent l'utilisateur, nous utilisons une architecture qui découpe les tâches lourdes en micro-opérations pour éviter les plantages serveur (timeouts), même sur les hébergements mutualisés les plus restrictifs.
 
