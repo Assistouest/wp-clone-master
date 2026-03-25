@@ -3,7 +3,7 @@
 <img src="https://img.shields.io/badge/WordPress-5.6+-21759B?style=for-the-badge&logo=wordpress&logoColor=white" />
 <img src="https://img.shields.io/badge/PHP-7.4+-777BB4?style=for-the-badge&logo=php&logoColor=white" />
 <img src="https://img.shields.io/badge/Licence-GPL%20v2-2E7D32?style=for-the-badge" />
-<img src="https://img.shields.io/badge/Version-1.0.0-1B3A6B?style=for-the-badge" />
+<img src="https://img.shields.io/badge/Version-1.1.0-1B3A6B?style=for-the-badge" />
 
 <br /><br />
 
