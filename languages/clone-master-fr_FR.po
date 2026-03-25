@@ -1,0 +1,949 @@
+# Clone Master — French (fr_FR) translation
+# Copyright (C) 2026 Assistouest
+# This file is distributed under the GPL v2 or later.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Clone Master 1.0.0\n"
+"Report-Msgid-Bugs-To: https://github.com/Assistouest/clone-master\n"
+"POT-Creation-Date: 2026-03-23T00:00+0000\n"
+"PO-Revision-Date: 2026-03-23T00:00+0000\n"
+"Last-Translator: Assistouest\n"
+"Language-Team: French <fr@li.org>\n"
+"Language: fr_FR\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+"X-Generator: Clone Master i18n script\n"
+
+
+#: clone-master.php:212
+
+msgid "Clone Master"
+msgstr "Clone Master"
+
+msgid "Exporting..."
+msgstr ""
+
+msgid "Importing..."
+msgstr ""
+
+msgid "Operation completed successfully!"
+msgstr ""
+
+msgid "An error occurred."
+msgstr ""
+
+msgid "Support open-source"
+msgstr "Soutenir l'open-source"
+
+msgid "Missing session ID"
+msgstr "Identifiant de session manquant"
+
+msgid "Session not found: "
+msgstr "Session introuvable : "
+
+msgid "Corrupt manifest file"
+msgstr "Fichier manifeste corrompu"
+
+msgid "Unknown step: "
+msgstr "Étape inconnue : "
+
+msgid "Session initialized. Exporting database..."
+msgstr "Session initialisée. Export de la base de données…"
+
+msgid "tables exported. Scanning files..."
+msgstr "tables exportées. Analyse des fichiers…"
+
+msgid "archive jobs planned. Starting file archiving..."
+msgstr "tâches d'archivage planifiées. Démarrage…"
+
+msgid "All files archived. Capturing config..."
+msgstr "Tous les fichiers archivés. Capture de la configuration…"
+
+msgid "All files archived."
+msgstr "Tous les fichiers archivés."
+
+msgid "Configuration captured. Creating final package..."
+msgstr "Configuration capturée. Création du paquet final…"
+
+msgid "Cannot create ZIP archive at: "
+msgstr "Impossible de créer l'archive ZIP : "
+
+msgid "ZIP file was not created"
+msgstr "Le fichier ZIP n'a pas été créé"
+
+msgid "Export complete! Temporary files cleaned up."
+msgstr "Export terminé ! Fichiers temporaires supprimés."
+
+msgid "Cannot create ZIP: "
+msgstr "Impossible de créer le ZIP : "
+
+msgid "Archive file not found"
+msgstr "Fichier archive introuvable"
+
+msgid "Cannot open ZIP archive"
+msgstr "Impossible d'ouvrir l'archive ZIP"
+
+msgid "Cannot resolve session directory path."
+msgstr "Impossible de résoudre le chemin du répertoire de session."
+
+msgid "Invalid archive: manifest.json not found"
+msgstr "Archive invalide : manifest.json introuvable"
+
+msgid "Session not found"
+msgstr "Session introuvable"
+
+msgid "Missing or invalid installer token (expected 64-char hex string)."
+msgstr "Jeton d'installeur manquant ou invalide (chaîne hexadécimale de 64 caractères attendue)."
+
+msgid "bcrypt hashing failed — check PHP bcrypt support."
+msgstr "Échec du hachage bcrypt — vérifiez la prise en charge de bcrypt par PHP."
+
+msgid "Failed to create installer at: "
+msgstr "Impossible de créer l'installeur à : "
+
+msgid "Once Weekly"
+msgstr "Une fois par semaine"
+
+msgid "Once Monthly"
+msgstr "Une fois par mois"
+
+msgid "A backup is already running. Try again later."
+msgstr "Une sauvegarde est déjà en cours. Réessayez plus tard."
+
+msgid "automatic"
+msgstr "automatique"
+
+msgid "manual"
+msgstr "manuelle"
+
+msgid "[%1$s] %2$s backup successful"
+msgstr "[%1$s] Sauvegarde %2$s réussie"
+
+msgid "[%1$s] %2$s backup FAILED"
+msgstr "[%1$s] ÉCHEC sauvegarde %2$s"
+
+msgid "Unknown error"
+msgstr "Erreur inconnue"
+
+msgid "Local storage"
+msgstr "Stockage local"
+
+msgid "File stored locally."
+msgstr "Fichier stocké localement."
+
+msgid "File not found: "
+msgstr "Fichier introuvable : "
+
+msgid "Backup directory is writable."
+msgstr "Répertoire de sauvegarde accessible en écriture."
+
+msgid "Directory %1$s is not writable."
+msgstr "Le répertoire %1$s n'est pas accessible en écriture."
+
+msgid "Nextcloud"
+msgstr ""
+
+msgid "Local file not found."
+msgstr "Fichier local introuvable."
+
+msgid "File uploaded to Nextcloud (%1$s, %2$s)."
+msgstr "Fichier uploadé sur Nextcloud (%1$s, %2$s)."
+
+msgid "Nextcloud URL is missing."
+msgstr "URL Nextcloud manquante."
+
+msgid "Username is missing."
+msgstr "Nom d'utilisateur manquant."
+
+msgid "Password / token is missing."
+msgstr "Mot de passe / token manquant."
+
+msgid "Network error: "
+msgstr "Erreur réseau : "
+
+msgid "Nextcloud connection successful. Folder is accessible."
+msgstr "Connexion Nextcloud réussie. Dossier accessible."
+
+msgid "Authentication refused — check your application token."
+msgstr "Authentification refusée — vérifiez le token d'application."
+
+msgid "Connection successful. Folder created on Nextcloud."
+msgstr "Connexion réussie. Dossier créé sur Nextcloud."
+
+msgid "Remote folder not found and could not be created (HTTP 404)."
+msgstr "Dossier distant introuvable et impossible à créer (HTTP 404)."
+
+msgid "Unexpected response from Nextcloud server (HTTP %1$s)."
+msgstr "Réponse inattendue du serveur Nextcloud (HTTP %1$s)."
+
+msgid "Cannot open local file."
+msgstr "Impossible d'ouvrir le fichier local."
+
+msgid "Upload successful."
+msgstr "Upload réussi."
+
+msgid "HTTP %1$s on PUT request."
+msgstr "HTTP %1$s lors du PUT."
+
+msgid "The PHP cURL extension is required for large file uploads."
+msgstr "L'extension PHP cURL est requise pour l'upload de fichiers volumineux."
+
+msgid "Cannot create upload session (HTTP %1$s)."
+msgstr "Impossible de créer la session d'upload (HTTP %1$s)."
+
+msgid "A backup is already running. Please wait and refresh the history."
+msgstr "Une sauvegarde est déjà en cours. Patientez et rafraîchissez l'historique."
+
+msgid "Good news!\\\\n\\\\n"
+msgstr "Bonne nouvelle !\\\\n\\\\n"
+
+msgid "Settings saved."
+msgstr "Paramètres sauvegardés."
+
+msgid "History cleared."
+msgstr "Historique effacé."
+
+msgid "Nextcloud account disconnected."
+msgstr "Compte Nextcloud déconnecté."
+
+msgid "Nextcloud URL is required."
+msgstr "URL Nextcloud manquante."
+
+msgid "Unable to reach Nextcloud: "
+msgstr "Impossible de joindre Nextcloud : "
+
+msgid "Unexpected response from Nextcloud (HTTP %s). Check the URL and that your instance is NC 16+."
+msgstr "Réponse inattendue de Nextcloud (HTTP %s). Vérifiez l'URL et que votre instance est en NC 16+."
+
+msgid "The poll endpoint returned by Nextcloud does not match the declared domain. Connection cancelled."
+msgstr "Le poll endpoint retourné par Nextcloud ne correspond pas au domaine déclaré. Connexion annulée."
+
+msgid "Session expired or invalid."
+msgstr "Session expirée ou invalide."
+
+msgid "Unexpected response (HTTP "
+msgstr "Réponse inattendue (HTTP "
+
+msgid "Invalid Nextcloud URL: only http and https protocols are accepted."
+msgstr "URL Nextcloud invalide : seuls les protocoles http et https sont acceptés."
+
+msgid "Invalid Nextcloud URL: missing host."
+msgstr "URL Nextcloud invalide : hôte manquant."
+
+msgid "Invalid Nextcloud URL: internal or reserved IP addresses are not allowed."
+msgstr "URL Nextcloud refusée : les adresses IP internes ou réservées ne sont pas autorisées."
+
+msgid "Search engines are <strong>blocked</strong> after migration. Go to <a>Settings &gt; Reading</a> to enable indexing once the site is verified."
+msgstr "Les moteurs de recherche sont <strong>bloqués</strong> suite à la migration. Allez dans <a>Réglages &gt; Lecture</a> pour activer l'indexation une fois le site validé."
+
+msgid "Export your site"
+msgstr "Exporter votre site"
+
+msgid "Start full export"
+msgstr "Lancer la sauvegarde"
+
+msgid "Complete backup of your site"
+msgstr "Sauvegarde complète de votre site"
+
+msgid "Creates a complete archive of your WordPress installation, ready to migrate or store safely."
+msgstr "Crée une archive complète de votre installation WordPress, prête à migrer ou à conserver en toute sécurité."
+
+msgid "Your database, themes, plugins, media and configuration files are securely archived. You can then restore them on any host."
+msgstr "Votre base de données, vos thèmes, extensions, médias et fichiers de configuration sont archivés de façon sécurisée. Vous pouvez ensuite les restaurer sur n'importe quel hébergement."
+
+msgid "Backup created successfully."
+msgstr "Sauvegarde créée avec succès."
+
+msgid "Backup complete."
+msgstr "Sauvegarde terminée."
+
+msgid "Upload a Clone Master archive to restore your site on this host. All URLs are replaced automatically, including in serialised data."
+msgstr "Chargez une archive Clone Master pour restaurer votre site sur cet hébergement. Toutes les URLs sont remplacées automatiquement, y compris dans les données sérialisées."
+
+msgid "Select an archive"
+msgstr "Sélectionner une archive"
+
+msgid "Drop your archive here"
+msgstr "Déposez votre archive ici"
+
+msgid "Drop your .zip file or click to select it. Large files are sent in parts to work around server limits."
+msgstr "Déposez votre fichier .zip ou cliquez pour le sélectionner. Les fichiers volumineux sont envoyés en plusieurs parties pour éviter les limitations serveur."
+
+msgid "Accepted format: .zip — or click to browse"
+msgstr "Format accepté : .zip — ou cliquez pour parcourir"
+
+msgid "Restore settings"
+msgstr "Paramètres de restauration"
+
+msgid "Check the settings and configure the options before starting the restore."
+msgstr "Vérifiez les informations et configurez les options avant de lancer la restauration."
+
+msgid "Check the information and configure the options before starting the restore."
+msgstr "Vérifiez les informations et configurez les options avant de lancer la restauration."
+
+msgid "Advanced options"
+msgstr "Options avancées"
+
+msgid "Regenerate permalinks"
+msgstr "Régénérer les permaliens"
+
+msgid "Recommended after every restore."
+msgstr "Recommandé après chaque restauration."
+
+msgid "Deletes cached rewrite rules — WordPress will regenerate them on first load."
+msgstr "Supprime les règles de réécriture mises en cache — WordPress les recréera au premier chargement."
+
+msgid "Hide site from search engines"
+msgstr "Masquer le site aux moteurs de recherche"
+
+msgid "Leave as-is if restoring on the same domain."
+msgstr "Laissez tel quel si vous restaurez sur le même domaine."
+
+msgid "Current URL if restoring on the same domain."
+msgstr "URL actuelle si vous restaurez sur le même domaine."
+
+msgid "Destination URL"
+msgstr "URL de destination"
+
+msgid "Analysing backup…"
+msgstr "Analyse de la sauvegarde…"
+
+msgid "Reading backup…"
+msgstr "Lecture de la sauvegarde…"
+
+msgid "Installer ready."
+msgstr "Installeur prêt."
+
+msgid "Upload complete"
+msgstr "Envoi terminé"
+
+msgid "Archive received successfully."
+msgstr "Archive reçue avec succès."
+
+msgid "Migration completed successfully."
+msgstr "Migration terminée avec succès."
+
+msgid "Your site has been restored successfully!"
+msgstr "Votre site a été restauré avec succès !"
+
+msgid "Restore complete."
+msgstr "Restauration terminée."
+
+msgid "Restoring…"
+msgstr "Restauration en cours…"
+
+msgid "The migration is complete. Please log back into the "
+msgstr "La migration est terminée. Veuillez vous reconnecter à l'"
+
+msgid "WordPress admin to verify everything is working correctly."
+msgstr "interface d'administration WordPress pour vérifier que tout fonctionne correctement."
+
+msgid "Log back into WordPress to verify everything is working correctly."
+msgstr "Reconnectez-vous à WordPress pour vérifier que tout fonctionne correctement."
+
+msgid " plugin(s) put on standby for your security"
+msgstr " extension(s) mise(s) en veille pour votre sécurité"
+
+msgid "These security or cache plugins have been deactivated because they can block "
+msgstr "Ces extensions de sécurité ou de cache ont été désactivées car elles peuvent bloquer l'"
+
+msgid "access after migration (WAF firewall, CAPTCHA tied to source domain, etc.). Re-enable them manually after logging back in."
+msgstr "accès après migration (pare-feu WAF, CAPTCHA lié au domaine source, etc.). Réactivez-les manuellement après vous être reconnecté."
+
+msgid "URLs will be replaced throughout the database → "
+msgstr "Les URLs seront remplacées dans toute la base de données → "
+
+msgid "old URL will be replaced in the database."
+msgstr "ancienne URL sera remplacée dans la base de données."
+
+msgid "Processing — please do not close this page."
+msgstr "Traitement en cours — veuillez ne pas fermer cette page."
+
+msgid "Processing, please wait…"
+msgstr "Traitement en cours, veuillez patienter…"
+
+msgid "Uploading — please do not close this page."
+msgstr "Envoi en cours — veuillez ne pas fermer cette page."
+
+msgid "Uploading archive…"
+msgstr "Envoi de l'archive…"
+
+msgid "Fatal PHP error detected. "
+msgstr "Erreur PHP fatale détectée. "
+
+msgid "Server error without detail"
+msgstr "Erreur serveur sans détail"
+
+msgid "The server returned an unexpected response. "
+msgstr "Le serveur a retourné une réponse inattendue. "
+
+msgid "The server rejects chunks even at "
+msgstr "Le serveur rejette les chunks même à "
+
+msgid "Failed to send this chunk even after size reduction."
+msgstr "Impossible d'envoyer ce chunk même après réduction de taille."
+
+msgid "MB sent — "
+msgstr "Mo envoyés — "
+
+msgid "MB — initial size: "
+msgstr "Mo — taille initiale : "
+
+msgid "Adaptive upload of "
+msgstr "Envoi adaptatif de "
+
+msgid "Sending archive directly "
+msgstr "Envoi direct de l'archive "
+
+msgid "Analysing archive…"
+msgstr "Analyse de l'archive…"
+
+msgid "Preparing installer…"
+msgstr "Préparation de l'installeur…"
+
+msgid "Network error on step "
+msgstr "Erreur réseau sur l'étape "
+
+msgid "Invalid response on step "
+msgstr "Réponse invalide sur l'étape "
+
+msgid "Installer error on step "
+msgstr "Erreur d'installeur sur l'étape "
+
+msgid "PHP execution time exceeded. "
+msgstr "Délai PHP dépassé. "
+
+msgid "Insufficient PHP memory. "
+msgstr "Mémoire PHP insuffisante. "
+
+msgid "Timeout — the server may still be processing."
+msgstr "Délai dépassé — le serveur est peut-être encore en cours de traitement."
+
+msgid "Timeout"
+msgstr "Délai"
+
+msgid "Insufficient memory. "
+msgstr "Mémoire insuffisante. "
+
+msgid "PHP memory"
+msgstr "Mémoire PHP"
+
+msgid "Preparing the "
+msgstr "Préparation de l'"
+
+msgid "Backups tab — switching to the "
+msgstr "Onglet Sauvegardes — passage à l'"
+
+msgid "All your archives are listed here. Download them for safekeeping or restore them directly on this site."
+msgstr "Toutes vos archives sont listées ici. Téléchargez-les pour les conserver ou restaurez-les directement sur ce site."
+
+msgid "No backups available. Run an export to create one."
+msgstr "Aucune sauvegarde disponible. Lancez une exportation pour en créer une."
+
+msgid "Permanently delete this backup?"
+msgstr "Supprimer définitivement cette sauvegarde ?"
+
+msgid "Download archive"
+msgstr "Télécharger l'archive"
+
+msgid "Download"
+msgstr "Télécharger"
+
+msgid "Created on"
+msgstr "Créée le"
+
+msgid "Database"
+msgstr "Base de données"
+
+msgid "Media"
+msgstr "Médias"
+
+msgid "Active theme"
+msgstr "Thème actif"
+
+msgid "Table prefix"
+msgstr "Préfixe des tables"
+
+msgid "WordPress details"
+msgstr "Détails WordPress"
+
+msgid "Directory permissions"
+msgstr "Permissions des répertoires"
+
+msgid "Collapse"
+msgstr "Réduire"
+
+msgid "Archive source"
+msgstr "Source de l'archive"
+
+msgid "Backup in progress… "
+msgstr "Sauvegarde en cours… "
+
+msgid "Backup…"
+msgstr "Sauvegarde…"
+
+msgid "Loading…"
+msgstr "Chargement…"
+
+msgid " DISABLE_WP_CRON is active — automatic backups will not fire via WP-Cron."
+msgstr " DISABLE_WP_CRON est actif — les sauvegardes auto ne se déclencheront pas via WP-Cron."
+
+msgid "Next run: "
+msgstr "Prochaine exécution : "
+
+msgid "Success"
+msgstr "Succès"
+
+msgid "latest backups  "
+msgstr "dernières sauvegardes"
+
+msgid "or contact your host. In the meantime, only local storage is available."
+msgstr "ou contactez votre hébergeur. En attendant, seul le stockage local est disponible."
+
+msgid "may be publicly accessible, allowing "
+msgstr "peut être accessible publiquement, permettant à n'importe qui de "
+
+msgid "Failure"
+msgstr "Échec"
+
+msgid "The directory "
+msgstr "Le répertoire "
+
+msgid "Add this block to your Nginx configuration and reload it:"
+msgstr "Ajoutez ce bloc à votre configuration Nginx et rechargez-le :"
+
+msgid "Set up a real system cron: "
+msgstr "Configurez un vrai cron système : "
+
+msgid "Connected to Nextcloud"
+msgstr "Connecté à Nextcloud"
+
+msgid "Connection cancelled — the window was closed."
+msgstr "Connexion annulée — la fenêtre a été fermée."
+
+msgid "Duration"
+msgstr "Durée"
+
+msgid "Trigger"
+msgstr "Déclencheur"
+
+msgid "Disconnect"
+msgstr "Déconnecter"
+
+msgid "Waiting for authorisation…"
+msgstr "En attente de votre autorisation…"
+
+msgid "Frequency"
+msgstr "Fréquence"
+
+msgid "Backups are stored in "
+msgstr "Les sauvegardes sont stockées dans "
+
+msgid "Nextcloud unavailable — OpenSSL extension missing"
+msgstr "Nextcloud non disponible — OpenSSL manquant"
+
+msgid "Nginx detected — backup folder potentially public"
+msgstr "Nginx détecté — dossier backup potentiellement public"
+
+msgid "Retention"
+msgstr "Rétention"
+
+msgid "Backup complete — "
+msgstr "Sauvegarde terminée — "
+
+msgid "applies only to automatic backups (auto_ prefix). Manual backups are never deleted."
+msgstr "s'applique uniquement aux sauvegardes automatiques (préfixe auto_). Les sauvegardes manuelles ne sont jamais supprimées."
+
+msgid "anyone to download your archives. "
+msgstr "n'importe qui de télécharger vos archives. "
+
+msgid "open, then click 'Authorise'."
+msgstr "ouvrira pour que vous puissiez autoriser l'accès."
+
+msgid "Failure: "
+msgstr "Échec : "
+
+msgid "on failure only"
+msgstr "échec uniquement"
+
+msgid "Also keep a local copy after "
+msgstr "Conserver aussi une copie locale après l'"
+
+msgid "Log in to Nextcloud in the window that just "
+msgstr "Connectez-vous à Nextcloud dans la fenêtre qui vient de s'"
+
+msgid "Connect to your Nextcloud in one click. A window will open for you to authorise access — no password is entered here."
+msgstr "Connectez-vous à votre Nextcloud en un clic. Une fenêtre s'ouvrira pour que vous puissiez autoriser l'accès — aucun mot de passe n'est saisi ici."
+
+msgid "Retention "
+msgstr "La rétention s'"
+
+msgid "The folder will be created automatically if "
+msgstr "Le dossier sera créé automatiquement s'"
+
+msgid "access — no password is "
+msgstr "accès — aucun mot de passe n'est "
+
+msgid "Security check failed (session expired?). Reload the page and try again."
+msgstr "Vérification de sécurité échouée (session expirée ?). Rechargez la page et réessayez."
+
+msgid "Security check failed — reload the page."
+msgstr "Vérification de sécurité échouée — rechargez la page."
+
+msgid "Network error on "
+msgstr "Erreur réseau sur "
+
+msgid "Empty response — server may have timed out. "
+msgstr "Réponse vide — le serveur a peut-être expiré. "
+
+msgid "Unexpected response: "
+msgstr "Réponse inattendue : "
+
+msgid "Invalid response on \\\\\\\""
+msgstr ""
+
+msgid "Empty response."
+msgstr "Réponse vide."
+
+msgid "Non-JSON response from server (HTTP "
+msgstr "Réponse non-JSON du serveur (HTTP "
+
+msgid "Save settings"
+msgstr "Sauvegarder"
+
+msgid "Saving…"
+msgstr "Sauvegarde en cours…"
+
+msgid "Retrying in ${w}s…"
+msgstr "Nouvelle tentative dans ${w}s…"
+
+msgid "File too large (413 Request Entity Too Large). "
+msgstr "Fichier trop volumineux (413 Request Entity Too Large). "
+
+msgid "Empty response. "
+msgstr "Réponse vide. "
+
+msgid "Click to choose a different file"
+msgstr "Cliquez pour choisir un autre fichier"
+
+msgid "Speed: "
+msgstr "Débit : "
+
+msgid " MB sent — "
+msgstr " Mo envoyés — "
+
+msgid " MB — initial size: "
+msgstr " Mo — taille initiale : "
+
+msgid "KB"
+msgstr "Ko"
+
+msgid "done"
+msgstr "terminé"
+
+msgid "archiving…"
+msgstr "archivage…"
+
+msgid "execution"
+msgstr "exécution"
+
+msgid "activity"
+msgstr "activité"
+
+msgid "step \\\\\\\""
+msgstr ""
+
+msgid "Missing or invalid installer token (must be ≥ 32 chars)."
+msgstr "Jeton d'installeur manquant ou invalide (longueur minimale : 32 caractères)."
+
+msgid "Export"
+msgstr "Exporter"
+
+msgid "Restore"
+msgstr "Restaurer"
+
+msgid "Backups"
+msgstr "Sauvegardes"
+
+msgid "Server"
+msgstr "Serveur"
+
+msgid "Backup, migration and restore for your WordPress site"
+msgstr "Sauvegarde, migration et restauration de votre site WordPress"
+
+msgid "Restore or migrate your site"
+msgstr "Restaurer ou migrer votre site"
+
+msgid "Analyse archive"
+msgstr "Analyser l'archive"
+
+msgid "Start restore"
+msgstr "Lancer la restauration"
+
+msgid "Your backups"
+msgstr "Vos sauvegardes"
+
+msgid "Refresh"
+msgstr "Actualiser"
+
+msgid "File"
+msgstr "Fichier"
+
+msgid "Size"
+msgstr "Taille"
+
+msgid "Origin"
+msgstr "Origine"
+
+msgid "Restore this backup"
+msgstr "Restaurer cette sauvegarde"
+
+msgid "Delete"
+msgstr "Supprimer"
+
+msgid "Error: "
+msgstr "Erreur : "
+
+msgid "Failed to load server information."
+msgstr "Impossible de charger les informations serveur."
+
+msgid "Server limits"
+msgstr "Limites serveur"
+
+msgid "Free disk space"
+msgstr "Espace libre"
+
+msgid "Execution time"
+msgstr "Temps d'exécution"
+
+msgid "Chunk size"
+msgstr "Taille de chunk"
+
+msgid "Table count"
+msgstr "Nombre de tables"
+
+msgid "Yes"
+msgstr "Oui"
+
+msgid "No"
+msgstr "Non"
+
+msgid "PHP Extensions"
+msgstr "Extensions PHP"
+
+msgid "Not accessible"
+msgstr "Non accessible"
+
+msgid "Site URL"
+msgstr "URL du site"
+
+msgid "Active plugins"
+msgstr "Extensions actives"
+
+msgid "Permalink structure"
+msgstr "Structure des permaliens"
+
+msgid "Default"
+msgstr "Simple"
+
+msgid "ABSPATH"
+msgstr "Chemin ABSPATH"
+
+msgid "wp-content dir"
+msgstr "Dossier wp-content"
+
+msgid "Every hour"
+msgstr "Toutes les heures"
+
+msgid "Twice daily"
+msgstr "2 fois par jour"
+
+msgid "Every day"
+msgstr "Chaque jour"
+
+msgid "Every week"
+msgstr "Chaque semaine"
+
+msgid "Every month"
+msgstr "Chaque mois"
+
+msgid "Server error"
+msgstr "Erreur serveur"
+
+msgid "Please enter your Nextcloud server URL."
+msgstr "Saisissez l'URL de votre serveur Nextcloud."
+
+msgid "Automatic backup"
+msgstr "Sauvegarde automatique"
+
+msgid "Keep the "
+msgstr "Garder les "
+
+msgid "or for "
+msgstr "ou pendant "
+
+msgid " days"
+msgstr " jours"
+
+msgid "Email notifications"
+msgstr "Notifications email"
+
+msgid "Always"
+msgstr "Toujours"
+
+msgid "On failure only"
+msgstr "En cas d'échec uniquement"
+
+msgid "Never"
+msgstr "Jamais"
+
+msgid "Backup destination"
+msgstr "Destination des sauvegardes"
+
+msgid "on this server."
+msgstr "sur ce serveur."
+
+msgid "Run now"
+msgstr "Lancer maintenant"
+
+msgid "Backup history"
+msgstr "Historique des sauvegardes"
+
+msgid "No backups in history."
+msgstr "Aucune sauvegarde dans l'historique."
+
+msgid "Schedule"
+msgstr "Planification"
+
+msgid "Clear history"
+msgstr "Effacer l'historique"
+
+msgid "Status"
+msgstr "Statut"
+
+msgid "Storage"
+msgstr "Stockage"
+
+msgid "File / Error"
+msgstr "Fichier / Erreur"
+
+msgid "New site URL"
+msgstr "Nouvelle URL du site"
+
+msgid "All occurrences of the old URL will be replaced in the database."
+msgstr "Toutes les occurrences de l'ancienne URL seront remplacées dans la base de données."
+
+msgid "Nextcloud unavailable: PHP OpenSSL extension is missing on this server."
+msgstr "Nextcloud indisponible : l'extension PHP OpenSSL est absente sur ce serveur."
+
+msgid "The PHP "
+msgstr "L'extension PHP "
+
+msgid " extension is missing on this server. Clone Master needs it to encrypt your Nextcloud credentials before storing them. "
+msgstr " est absente sur ce serveur. Clone Master en a besoin pour chiffrer vos identifiants Nextcloud avant de les stocker. "
+
+msgid "To enable it, add "
+msgstr "Pour l'activer, ajoutez "
+
+msgid "Nginx ignores "
+msgstr "Nginx ignore les fichiers "
+
+msgid " files. The directory "
+msgstr ". Le répertoire "
+
+
+msgid "Activity log"
+msgstr "Journal d'activité"
+
+msgid "Show"
+msgstr "Afficher"
+
+msgid "New restore"
+msgstr "Nouvelle restauration"
+
+msgid "An error occurred"
+msgstr "Une erreur est survenue"
+
+msgid "← Start over"
+msgstr "← Recommencer"
+
+msgid "Date"
+msgstr "Date"
+
+msgid "Actions"
+msgstr "Actions"
+
+msgid "Writable"
+msgstr "Accessible en écriture"
+
+msgid "Not writable"
+msgstr "Non accessible en écriture"
+
+msgid "Sending archive directly ("
+msgstr "Envoi direct de l'archive ("
+
+msgid "Plugins put on standby ("
+msgstr "Plugins mis en veille ("
+
+msgid "Asks Google & Bing not to index this site (WordPress \"Discourage search engines\" option). Recommended during post-migration validation — uncheck once verified."
+msgstr "Demande à Google & Bing de ne pas indexer ce site (option WordPress \"Décourager les moteurs de recherche\"). Recommandé pendant la validation post-migration — à décocher une fois validé."
+
+msgid "The migration is complete. Please log back into the WordPress admin to verify everything is working correctly."
+msgstr "La migration est terminée. Reconnectez-vous à l'interface d'administration WordPress pour vérifier que tout fonctionne."
+
+msgid "These security or cache plugins have been deactivated because they can block access after migration (WAF firewall, CAPTCHA tied to source domain, etc.). Re-enable them manually after logging back in."
+msgstr "Ces extensions de sécurité ou de cache ont été désactivées car elles peuvent bloquer l'accès après migration (pare-feu WAF, CAPTCHA lié au domaine source, etc.). Réactivez-les manuellement après reconnexion."
+
+msgid " Automatic backup"
+msgstr " Sauvegarde automatique"
+
+msgid " Enable automatic backup"
+msgstr " Activer la sauvegarde automatique"
+
+msgid " Keep the "
+msgstr " Garder les "
+
+msgid " latest backups  "
+msgstr " dernières sauvegardes  "
+
+msgid " or for "
+msgstr " ou pendant "
+
+msgid "Connect to Nextcloud"
+msgstr "Connecter Nextcloud"
+
+msgid "Log in to Nextcloud in the window that just opened, then click ‘Authorise’."
+msgstr "Connectez-vous à Nextcloud dans la fenêtre qui vient de s'ouvrir, puis cliquez sur « Autoriser »."
+
+msgid " in your "
+msgstr " dans votre "
+
+msgid " Run now"
+msgstr " Lancer maintenant"
+
+msgid " Backup in progress… "
+msgstr " Sauvegarde en cours… "
+
+msgid " Backup history"
+msgstr " Historique des sauvegardes"
+
+msgid " Success"
+msgstr " Succès"
+
+msgid "The folder will be created automatically if it does not exist."
+msgstr "Le dossier sera créé automatiquement s'il n'existe pas."
+
+msgid "Also keep a local copy after upload"
+msgstr "Conserver aussi une copie locale après l'envoi"
+
+msgid "Retention applies only to automatic backups (auto_ prefix). Manual backups are never deleted."
+msgstr "S'applique uniquement aux sauvegardes automatiques (préfixe auto_). Les sauvegardes manuelles ne sont jamais supprimées."
+
+msgid "New backup"
+msgstr "Nouvelle sauvegarde"
+
+msgid "PHP parse error. "
+msgstr "Erreur de syntaxe PHP. "

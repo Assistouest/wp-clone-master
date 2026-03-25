@@ -75,7 +75,7 @@ abstract class WPCM_Storage_Driver {
 class WPCM_Storage_Local extends WPCM_Storage_Driver {
 
     public function label(): string {
-        return 'Stockage local';
+        return __( 'Local storage', 'clone-master' );
     }
 
     /**
@@ -86,23 +86,27 @@ class WPCM_Storage_Local extends WPCM_Storage_Driver {
         $exists = file_exists( $local_path );
         return [
             'ok'          => $exists,
-            'message'     => $exists ? 'Fichier stocké localement.' : 'Fichier introuvable : ' . $local_path,
+            'message'     => $exists ? __( 'File stored locally.', 'clone-master' ) : __( 'File not found: ', 'clone-master' ) . $local_path,
             'remote_path' => $local_path,
         ];
     }
 
     public function delete( string $filename ): bool {
         $path = WPCM_BACKUP_DIR . $filename;
-        return file_exists( $path ) ? unlink( $path ) : true;
+        return file_exists( $path ) ? wp_delete_file( $path ) : true;
     }
 
     public function test(): array {
-        $writable = is_writable( WPCM_BACKUP_DIR );
+        $writable = is_writable( WPCM_BACKUP_DIR ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_is_writable -- WP_Filesystem requires admin credentials; unsuitable for background check
         return [
             'ok'      => $writable,
             'message' => $writable
-                ? 'Répertoire de sauvegarde accessible en écriture.'
-                : 'Le répertoire ' . WPCM_BACKUP_DIR . ' n\'est pas accessible en écriture.',
+                ? __( 'Backup directory is writable.', 'clone-master' )
+                : sprintf(
+			/* translators: %s: backup directory path */
+			__( 'Directory %1$s is not writable.', 'clone-master' ),
+			WPCM_BACKUP_DIR
+		),
         ];
     }
 }
@@ -122,7 +126,7 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
     }
 
     public function label(): string {
-        return 'Nextcloud';
+        return __( 'Nextcloud', 'clone-master' );
     }
 
     // ── WebDAV base URL ──────────────────────────────────────────────────────
@@ -157,6 +161,49 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
         ], $extra );
     }
 
+    // ── SSRF guard ───────────────────────────────────────────────────────────
+
+    /**
+     * Validates a Nextcloud URL against SSRF risks (scheme + resolved IP range).
+     *
+     * Mirrors WPCM_Plugin::validate_nextcloud_url() for the background/cron
+     * context where the main plugin class is not bootstrapped. Called by upload()
+     * before every outbound WebDAV connection so that an admin-modified DB value
+     * cannot be used to reach internal network resources via WP-Cron.
+     *
+     * Returns null on success, or a translated error string on failure.
+     *
+     * @param  string $url The Nextcloud base URL from settings.
+     * @return string|null  Null = safe to proceed; string = error message.
+     */
+    private static function ssrf_check( string $url ): ?string {
+        $parsed = wp_parse_url( $url );
+
+        if ( empty( $parsed['scheme'] ) || ! in_array( strtolower( $parsed['scheme'] ), [ 'http', 'https' ], true ) ) {
+            return __( 'Invalid Nextcloud URL: only http and https protocols are accepted.', 'clone-master' );
+        }
+
+        $host = $parsed['host'] ?? '';
+        if ( ! $host ) {
+            return __( 'Invalid Nextcloud URL: missing host.', 'clone-master' );
+        }
+
+        // Resolve hostname to IP; gethostbyname() returns input unchanged on failure.
+        $ip = gethostbyname( $host );
+        if ( $ip === $host && ! filter_var( $host, FILTER_VALIDATE_IP ) ) {
+            // Unresolvable hosts are not a SSRF risk — allow through without pinning.
+            return null;
+        }
+
+        // Block private (RFC 1918), loopback, link-local, and reserved ranges.
+        $flags = FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE;
+        if ( filter_var( $ip, FILTER_VALIDATE_IP, $flags ) === false ) {
+            return __( 'Invalid Nextcloud URL: internal or reserved IP addresses are not allowed.', 'clone-master' );
+        }
+
+        return null;
+    }
+
     // ── Public interface ─────────────────────────────────────────────────────
 
     /**
@@ -177,8 +224,20 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
      *             Destination: /remote.php/dav/files/{user}/{path}/{filename}
      */
     public function upload( string $local_path, string $filename ): array {
+        // ── SSRF guard ────────────────────────────────────────────────────────
+        // Re-validate the stored Nextcloud URL before every outbound connection.
+        // The AJAX handlers validate at save time, but this driver is also called
+        // from WP-Cron (background context) where the URL comes straight from DB.
+        // A DB value modified by a compromised admin account must not be able to
+        // reach internal network resources via the scheduler.
+        $ssrf_error = self::ssrf_check( (string) $this->settings->nextcloud_url );
+        if ( $ssrf_error !== null ) {
+            return [ 'ok' => false, 'message' => $ssrf_error, 'remote_path' => '' ];
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         if ( ! file_exists( $local_path ) ) {
-            return [ 'ok' => false, 'message' => 'Fichier local introuvable.', 'remote_path' => '' ];
+            return [ 'ok' => false, 'message' => __( 'Local file not found.', 'clone-master' ), 'remote_path' => '' ];
         }
 
         $size = filesize( $local_path );
@@ -198,13 +257,14 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
 
         // Optionally delete local copy
         if ( $this->settings->nextcloud_keep_local === false ) {
-            @unlink( $local_path );
+            @wp_delete_file( $local_path );
         }
 
         return [
             'ok'          => true,
             'message'     => sprintf(
-                'Fichier uploadé sur Nextcloud (%s, %s).',
+                /* translators: 1: filename, 2: file size */
+				__( 'File uploaded to Nextcloud (%1$s, %2$s).', 'clone-master' ),
                 size_format( $size ),
                 $size > self::CHUNK_THRESHOLD
                     ? ceil( $size / self::CHUNK_SIZE ) . ' morceaux'
@@ -234,13 +294,13 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
      */
     public function test(): array {
         if ( empty( $this->settings->nextcloud_url ) ) {
-            return [ 'ok' => false, 'message' => 'URL Nextcloud manquante.' ];
+            return [ 'ok' => false, 'message' => __( 'Nextcloud URL is missing.', 'clone-master' ) ];
         }
         if ( empty( $this->settings->nextcloud_user ) ) {
-            return [ 'ok' => false, 'message' => 'Nom d\'utilisateur manquant.' ];
+            return [ 'ok' => false, 'message' => __( 'Username is missing.', 'clone-master' ) ];
         }
         if ( empty( $this->settings->nextcloud_pass ) ) {
-            return [ 'ok' => false, 'message' => 'Mot de passe / token manquant.' ];
+            return [ 'ok' => false, 'message' => __( 'Password / token is missing.', 'clone-master' ) ];
         }
 
         $response = wp_remote_request(
@@ -256,25 +316,29 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
         );
 
         if ( is_wp_error( $response ) ) {
-            return [ 'ok' => false, 'message' => 'Erreur réseau : ' . $response->get_error_message() ];
+            return [ 'ok' => false, 'message' => __( 'Network error: ', 'clone-master' ) . $response->get_error_message() ];
         }
 
         $code = wp_remote_retrieve_response_code( $response );
 
         if ( $code === 207 ) {
-            return [ 'ok' => true, 'message' => 'Connexion Nextcloud réussie. Dossier accessible.' ];
+            return [ 'ok' => true, 'message' => __( 'Nextcloud connection successful. Folder is accessible.', 'clone-master' ) ];
         }
         if ( $code === 401 ) {
-            return [ 'ok' => false, 'message' => 'Authentification refusée — vérifiez le token d\'application.' ];
+            return [ 'ok' => false, 'message' => __( 'Authentication refused — check your application token.', 'clone-master' ) ];
         }
         if ( $code === 404 ) {
             $created = $this->ensure_remote_dir();
             return $created
-                ? [ 'ok' => true,  'message' => 'Connexion réussie. Dossier créé sur Nextcloud.' ]
-                : [ 'ok' => false, 'message' => 'Dossier distant introuvable et impossible à créer (HTTP 404).' ];
+                ? [ 'ok' => true,  'message' => __( 'Connection successful. Folder created on Nextcloud.', 'clone-master' ) ]
+                : [ 'ok' => false, 'message' => __( 'Remote folder not found and could not be created (HTTP 404).', 'clone-master' ) ];
         }
 
-        return [ 'ok' => false, 'message' => 'Réponse inattendue du serveur Nextcloud (HTTP ' . $code . ').' ];
+        return [ 'ok' => false, 'message' => sprintf(
+		/* translators: %s: HTTP status code */
+		__( 'Unexpected response from Nextcloud server (HTTP %1$s).', 'clone-master' ),
+		$code
+	) ];
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────
@@ -289,6 +353,7 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
      * Single-PUT upload for files ≤ CHUNK_THRESHOLD.
      * Uses cURL streaming so the file is never loaded into PHP memory.
      */
+    // phpcs:disable WordPress.WP.AlternativeFunctions.curl_curl_init,WordPress.WP.AlternativeFunctions.curl_curl_setopt_array,WordPress.WP.AlternativeFunctions.curl_curl_exec,WordPress.WP.AlternativeFunctions.curl_curl_getinfo,WordPress.WP.AlternativeFunctions.curl_curl_error,WordPress.WP.AlternativeFunctions.curl_curl_close,WordPress.WP.AlternativeFunctions.file_system_operations_fopen,WordPress.WP.AlternativeFunctions.file_system_operations_fread,WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- cURL required for Nextcloud WebDAV upload; wp_remote_request() cannot stream binary files
     private function single_put( string $local_path, string $filename, int $size ): array {
         if ( ! function_exists( 'curl_init' ) ) {
             return $this->wp_put_small( $local_path, $filename );
@@ -296,7 +361,7 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
 
         $handle = fopen( $local_path, 'rb' );
         if ( ! $handle ) {
-            return [ 'ok' => false, 'message' => 'Impossible d\'ouvrir le fichier local.', 'remote_path' => '' ];
+            return [ 'ok' => false, 'message' => __( 'Cannot open local file.', 'clone-master' ), 'remote_path' => '' ];
         }
 
         $url = $this->dav_url( $filename );
@@ -318,13 +383,17 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
         fclose( $handle );
 
         if ( $error ) {
-            return [ 'ok' => false, 'message' => 'Erreur cURL : ' . $error, 'remote_path' => '' ];
+            return [ 'ok' => false, 'message' => 'cURL error: ' . $error, 'remote_path' => '' ];
         }
 
         $ok = in_array( $http_code, [ 200, 201, 204 ], true );
         return [
             'ok'          => $ok,
-            'message'     => $ok ? 'Upload réussi.' : 'HTTP ' . $http_code . ' lors du PUT.',
+            'message'     => $ok ? __( 'Upload successful.', 'clone-master' ) : sprintf(
+				/* translators: %s: HTTP status code */
+				__( 'HTTP %1$s on PUT request.', 'clone-master' ),
+				$http_code
+			),
             'remote_path' => $url,
         ];
     }
@@ -345,7 +414,7 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
             // cURL is mandatory for chunked upload — no safe fallback for 3 GB files
             return [
                 'ok'          => false,
-                'message'     => 'L\'extension PHP cURL est requise pour l\'upload de fichiers volumineux.',
+                'message'     => __( 'The PHP cURL extension is required for large file uploads.', 'clone-master' ),
                 'remote_path' => '',
             ];
         }
@@ -362,7 +431,11 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
         if ( ! in_array( $mkcol['code'], [ 201, 405 ], true ) ) {
             return [
                 'ok'          => false,
-                'message'     => 'Impossible de créer la session d\'upload (HTTP ' . $mkcol['code'] . ').',
+                'message'     => sprintf(
+				/* translators: %s: HTTP status code */
+				__( 'Cannot create upload session (HTTP %1$s).', 'clone-master' ),
+				$mkcol['code']
+			),
                 'remote_path' => '',
             ];
         }
@@ -393,7 +466,7 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
                 return [
                     'ok'          => false,
                     'message'     => sprintf(
-                        'Échec sur le morceau %d/%d (HTTP %d). Upload annulé.',
+                        'Chunk %d/%d failed (HTTP %d). Upload cancelled.',
                         $chunk_num + 1, $total_chunks, $result['code']
                     ),
                     'remote_path' => '',
@@ -421,8 +494,8 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
         if ( ! in_array( $move['code'], [ 200, 201, 204 ], true ) ) {
             return [
                 'ok'          => false,
-                'message'     => 'Assemblage échoué (HTTP ' . $move['code'] . '). '
-                               . 'Les morceaux sont intacts sur Nextcloud — réessayez.',
+                'message'     => 'Assembly failed (HTTP ' . $move['code'] . '). '
+                               . 'Chunks are still on Nextcloud — please retry.',
                 'remote_path' => '',
             ];
         }
@@ -430,7 +503,7 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
         return [
             'ok'          => true,
             'message'     => sprintf(
-                'Upload en %d morceaux réussi (%s).',
+                'Chunked upload successful (%d parts, %s).',
                 $total_chunks,
                 size_format( $size )
             ),
@@ -468,7 +541,7 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
         $ok   = in_array( $code, [ 200, 201, 204 ], true );
         return [
             'ok'          => $ok,
-            'message'     => $ok ? 'Upload réussi.' : 'HTTP ' . $code . ' lors du PUT.',
+            'message'     => $ok ? 'Upload successful.' : 'HTTP ' . $code . ' on PUT request.',
             'remote_path' => $url,
         ];
     }
@@ -527,6 +600,7 @@ class WPCM_Storage_Nextcloud extends WPCM_Storage_Driver {
 
         return [ 'code' => $code, 'error' => $error ];
     }
+    // phpcs:enable
 
     /**
      * Returns the Authorization header array for cURL.

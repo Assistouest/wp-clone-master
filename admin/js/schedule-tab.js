@@ -1,5 +1,5 @@
 /**
- * schedule-tab.js — Automatic backup tab for WP Clone Master.
+ * schedule-tab.js — Automatic backup tab for Clone Master.
  *
  * Loaded AFTER admin.js. Patches window.__wpcmApp (a sentinel the modified
  * admin.js exposes) to inject the ScheduleTab into the running React app.
@@ -13,6 +13,13 @@
     if ( ! wp || ! wp.element ) return;
 
     const { createElement: h, useState, useEffect, useCallback, Fragment } = wp.element;
+    const { __ } = wp.i18n;
+
+    /* =========================================================
+       Server capabilities — resolved once from wpcmData
+       ========================================================= */
+    var HAS_OPENSSL  = wpcmData.hasOpenssl  !== false;   // false only when PHP openssl ext absent
+    var SERVER_TYPE  = wpcmData.serverType  || 'unknown'; // 'nginx' | 'apache' | 'litespeed' | 'unknown'
 
     /* =========================================================
        API helper — robust, reads text first like admin.js
@@ -31,22 +38,22 @@
             .then( function ( r ) {
                 return r.text().then( function ( text ) {
                     if ( text === '-1' || text === '0' ) {
-                        throw new Error( 'Vérification de sécurité échouée — rechargez la page.' );
+                        throw new Error( __( 'Security check failed — reload the page.', 'clone-master' ) );
                     }
                     var json;
                     try { json = JSON.parse( text ); } catch ( e ) {
-                        var msg = 'Réponse non-JSON du serveur (HTTP ' + r.status + '). ';
-                        if ( text.indexOf( 'Fatal error' )  !== -1 ) msg += 'Erreur PHP fatale. ';
-                        if ( text.indexOf( 'Parse error' )  !== -1 ) msg += 'Erreur de syntaxe PHP. ';
-                        if ( text.indexOf( 'Maximum execution time' ) !== -1 ) msg += 'Délai PHP dépassé. ';
-                        if ( text.indexOf( 'Allowed memory size' )    !== -1 ) msg += 'Mémoire PHP insuffisante. ';
-                        if ( ! text.trim() ) { msg += 'Réponse vide.'; }
+                        var msg = 'Non-JSON response from server (HTTP ' + r.status + '). ';
+                        if ( text.indexOf( 'Fatal error' )  !== -1 ) msg += __( 'Fatal PHP error detected. ', 'clone-master' );
+                        if ( text.indexOf( 'Parse error' )  !== -1 ) msg += __( 'PHP parse error. ', 'clone-master' );
+                        if ( text.indexOf( 'Maximum execution time' ) !== -1 ) msg += 'PHP execution time exceeded. ';
+                        if ( text.indexOf( 'Allowed memory size' )    !== -1 ) msg += 'Insufficient PHP memory. ';
+                        if ( ! text.trim() ) { msg += 'Empty response.'; }
                         else { msg += 'Extrait : ' + text.substring( 0, 200 ).replace( /<[^>]+>/g, '' ).trim(); }
                         throw new Error( msg );
                     }
                     if ( ! json || ! json.success ) {
                         var d = json && json.data;
-                        throw new Error( String( ( d && typeof d === 'object' ? d.message : d ) || 'Erreur serveur' ) );
+                        throw new Error( String( ( d && typeof d === 'object' ? d.message : d ) || __( 'Server error', 'clone-master' ) ) );
                     }
                     return json.data;
                 } );
@@ -105,11 +112,11 @@
     }
 
     var FREQ_LABELS = {
-        hourly:     'Toutes les heures',
-        twicedaily: '2 fois par jour',
-        daily:      'Chaque jour',
-        weekly:     'Chaque semaine',
-        monthly:    'Chaque mois',
+        hourly:     __( 'Every hour', 'clone-master' ),
+        twicedaily: __( 'Twice daily', 'clone-master' ),
+        daily:      __( 'Every day', 'clone-master' ),
+        weekly:     __( 'Every week', 'clone-master' ),
+        monthly:    __( 'Every month', 'clone-master' ),
     };
 
     /* =========================================================
@@ -123,7 +130,7 @@
             }, 1000 );
             return function () { clearInterval( t ); };
         }, [] );
-        return h( 'span', null, ' Sauvegarde en cours… ' + formatDuration( elapsed ) );
+        return h( 'span', null, __( ' Backup in progress… ', 'clone-master' ) + formatDuration( elapsed ) );
     }
 
     /* =========================================================
@@ -200,7 +207,7 @@
             setSaveMsg( null );
             api( 'wpcm_save_schedule', settings )
                 .then( function ( data ) {
-                    setSaveMsg( { type: 'success', text: data.message || 'Paramètres sauvegardés.' } );
+                    setSaveMsg( { type: 'success', text: data.message || 'Settings saved.' } );
                     if ( data.next_run_human ) setNextRun( data.next_run_human );
                 } )
                 .catch( function ( err ) {
@@ -242,13 +249,13 @@
                             if ( latest.status === 'success' ) {
                                 setRunMsg( {
                                     type: 'success',
-                                    text: 'Sauvegarde terminée — ' + ( latest.filename || '' ) +
+                                    text: __( 'Backup complete — ', 'clone-master' ) + ( latest.filename || '' ) +
                                           ' (' + ( latest.size_human || '' ) + ', ' + formatDuration( latest.duration_sec ) + ')',
                                 } );
                             } else {
                                 setRunMsg( {
                                     type: 'error',
-                                    text: 'Échec : ' + ( latest.error || 'Erreur inconnue' ),
+                                    text: __( 'Failure: ', 'clone-master' ) + ( latest.error || __( 'Unknown error', 'clone-master' ) ),
                                 } );
                             }
                             loadHistory( true );
@@ -302,7 +309,7 @@
 
         function startNcConnect() {
             var url = ncUrlDraft.trim();
-            if ( ! url ) { setNcFlowError( 'Saisissez l\'URL de votre serveur Nextcloud.' ); return; }
+            if ( ! url ) { setNcFlowError( __( 'Please enter your Nextcloud server URL.', 'clone-master' ) ); return; }
             if ( ! /^https?:\/\//i.test( url ) ) { setNcFlowError( 'L\'URL doit commencer par https://' ); return; }
 
             setNcStatus( 'waiting' );
@@ -324,7 +331,7 @@
                         if ( popup && popup.closed ) {
                             stopNcPoll();
                             setNcStatus( 'disconnected' );
-                            setNcFlowError( 'Connexion annulée — la fenêtre a été fermée.' );
+                            setNcFlowError( __( 'Connection cancelled — the window was closed.', 'clone-master' ) );
                             return;
                         }
                         api( 'wpcm_nc_poll_flow', { session_id: sessionId } )
@@ -378,15 +385,15 @@
             /* ── Settings card ── */
             h( 'div', { className: 'wpcm-card' },
                 h( 'h3', { className: 'wpcm-card-title' },
-                    h( Ico, { n: 'clock' } ), ' Sauvegarde automatique'
+                    h( Ico, { n: 'clock' } ), __( ' Automatic backup', 'clone-master' )
                 ),
 
                 /* WP-Cron warning */
                 cronDisabled && h( 'div', { className: 'wpcm-alert wpcm-alert-warn', style: { marginBottom: 16 } },
                     h( Ico, { n: 'warn', s: 15 } ),
-                    ' DISABLE_WP_CRON est actif — les sauvegardes auto ne se déclencheront pas via WP-Cron.',
+                    __( ' DISABLE_WP_CRON is active — automatic backups will not fire via WP-Cron.', 'clone-master' ),
                     h( 'br' ),
-                    h( 'small', null, 'Configurez un vrai cron système : ',
+                    h( 'small', null, 'Set up a real system cron: ',
                         h( 'code', null, 'curl https://' + window.location.hostname + '/wp-cron.php?doing_wp_cron' )
                     )
                 ),
@@ -400,13 +407,13 @@
                             onChange: function ( e ) { set( 'enabled', e.target.checked ); }
                         } ),
                         h( 'span', { className: 'wpcm-toggle-slider' } ),
-                        ' Activer la sauvegarde automatique'
+                        __( ' Enable automatic backup', 'clone-master' )
                     )
                 ),
 
                 /* Frequency */
                 h( 'div', { className: 'wpcm-form-row' },
-                    h( 'label', { className: 'wpcm-form-label' }, 'Fréquence' ),
+                    h( 'label', { className: 'wpcm-form-label' }, 'Frequency' ),
                     h( 'select', {
                         className: 'wpcm-select',
                         disabled:  ! settings.enabled,
@@ -418,13 +425,13 @@
                         } )
                     ),
                     settings.enabled && nextRun && h( 'span', { className: 'wpcm-next-run' },
-                        h( Ico, { n: 'clock', s: 13 } ), ' Prochaine exécution : ', nextRun
+                        h( Ico, { n: 'clock', s: 13 } ), __( 'Next run: ', 'clone-master' ), nextRun
                     )
                 ),
 
                 /* Retention */
                 h( 'div', { className: 'wpcm-form-row' },
-                    h( 'label', { className: 'wpcm-form-label' }, 'Rétention' ),
+                    h( 'label', { className: 'wpcm-form-label' }, 'Retention' ),
                     h( 'div', { className: 'wpcm-retention-row' },
                         h( 'label', null,
                             h( 'input', {
@@ -432,7 +439,7 @@
                                 disabled: ! settings.enabled,
                                 checked:  settings.retention_mode === 'count',
                                 onChange: function () { set( 'retention_mode', 'count' ); }
-                            } ), ' Garder les '
+                            } ), __( ' Keep the ', 'clone-master' )
                         ),
                         h( 'input', {
                             type:     'number', min: 1, max: 365,
@@ -441,7 +448,7 @@
                             value:    settings.retention_count,
                             onChange: function ( e ) { set( 'retention_count', parseInt( e.target.value, 10 ) || 1 ); }
                         } ),
-                        h( 'span', null, ' dernières sauvegardes  ' ),
+                        h( 'span', null, __( ' latest backups  ', 'clone-master' ) ),
 
                         h( 'label', null,
                             h( 'input', {
@@ -449,7 +456,7 @@
                                 disabled: ! settings.enabled,
                                 checked:  settings.retention_mode === 'days',
                                 onChange: function () { set( 'retention_mode', 'days' ); }
-                            } ), ' ou pendant '
+                            } ), __( ' or for ', 'clone-master' )
                         ),
                         h( 'input', {
                             type:     'number', min: 1, max: 3650,
@@ -458,16 +465,16 @@
                             value:    settings.retention_days,
                             onChange: function ( e ) { set( 'retention_days', parseInt( e.target.value, 10 ) || 1 ); }
                         } ),
-                        h( 'span', null, ' jours' )
+                        h( 'span', null, __( ' days', 'clone-master' ) )
                     ),
                     h( 'small', { className: 'wpcm-hint' },
-                        'La rétention s\'applique uniquement aux sauvegardes automatiques (préfixe auto_). Les sauvegardes manuelles ne sont jamais supprimées.'
+                        __( 'Retention applies only to automatic backups (auto_ prefix). Manual backups are never deleted.', 'clone-master' )
                     )
                 ),
 
                 /* Notification */
                 h( 'div', { className: 'wpcm-form-row' },
-                    h( 'label', { className: 'wpcm-form-label' }, 'Notifications email' ),
+                    h( 'label', { className: 'wpcm-form-label' }, __( 'Email notifications', 'clone-master' ) ),
                     h( 'div', { className: 'wpcm-notif-row' },
                         h( 'input', {
                             type:        'email',
@@ -483,16 +490,16 @@
                             value:     settings.notify_on,
                             onChange:  function ( e ) { set( 'notify_on', e.target.value ); }
                         },
-                            h( 'option', { value: 'always' }, 'Toujours' ),
-                            h( 'option', { value: 'error'  }, 'En cas d\'échec uniquement' ),
-                            h( 'option', { value: 'never'  }, 'Jamais' )
+                            h( 'option', { value: 'always' }, __( 'Always', 'clone-master' ) ),
+                            h( 'option', { value: 'error'  }, __( 'On failure only', 'clone-master' ) ),
+                            h( 'option', { value: 'never'  }, __( 'Never', 'clone-master' ) )
                         )
                     )
                 ),
 
                 /* ── Storage destination ── */
                 h( 'div', { className: 'wpcm-form-row wpcm-storage-section' },
-                    h( 'label', { className: 'wpcm-form-label' }, 'Destination des sauvegardes' ),
+                    h( 'label', { className: 'wpcm-form-label' }, __( 'Backup destination', 'clone-master' ) ),
 
                     /* Driver selector tabs */
                     h( 'div', { className: 'wpcm-driver-tabs' },
@@ -507,12 +514,19 @@
                                 h( 'line', { x1: 6, y1: 6, x2: '6.01', y2: 6 } ),
                                 h( 'line', { x1: 6, y1: 18, x2: '6.01', y2: 18 } )
                             ),
-                            'Stockage local'
+                            __( 'Local storage', 'clone-master' )
                         ),
+                        /* ── Nextcloud tab button — disabled when OpenSSL is absent ── */
                         h( 'button', {
                             type:      'button',
-                            className: 'wpcm-driver-btn' + ( settings.storage_driver === 'nextcloud' ? ' active' : '' ),
-                            onClick:   function () { set( 'storage_driver', 'nextcloud' ); }
+                            className: 'wpcm-driver-btn'
+                                + ( settings.storage_driver === 'nextcloud' ? ' active' : '' )
+                                + ( ! HAS_OPENSSL ? ' wpcm-driver-btn-disabled' : '' ),
+                            disabled:  ! HAS_OPENSSL,
+                            title:     ! HAS_OPENSSL
+                                ? __( 'Nextcloud unavailable: PHP OpenSSL extension is missing on this server.', 'clone-master' )
+                                : '',
+                            onClick:   ! HAS_OPENSSL ? undefined : function () { set( 'storage_driver', 'nextcloud' ); }
                         },
                             h( 'svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', style: { verticalAlign: 'middle', marginRight: 5 } },
                                 h( 'path', { d: 'M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z' } )
@@ -521,9 +535,53 @@
                         )
                     ),
 
-                    /* ── Local storage hint ── */
-                    settings.storage_driver === 'local' && h( 'small', { className: 'wpcm-hint' },
-                        'Les sauvegardes sont stockées dans ', h( 'code', null, 'wp-content/wpcm-backups/' ), ' sur ce serveur.'
+                    /* ── Alerte OpenSSL absent ── */
+                    ! HAS_OPENSSL && h( 'div', { className: 'wpcm-notice wpcm-notice-error', style: { marginTop: 10 } },
+                        h( 'svg', { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', style: { verticalAlign: 'middle', marginRight: 6, flexShrink: 0 } },
+                            h( 'circle', { cx: 12, cy: 12, r: 10 } ),
+                            h( 'line', { x1: 12, y1: 8, x2: 12, y2: 12 } ),
+                            h( 'line', { x1: 12, y1: 16, x2: '12.01', y2: 16 } )
+                        ),
+                        h( 'div', null,
+                            h( 'strong', null, 'Nextcloud unavailable — OpenSSL extension missing' ),
+                            h( 'br' ),
+                            'The PHP ',
+                            h( 'code', null, 'openssl' ),
+                            __( ' extension is missing on this server. Clone Master needs it to encrypt your Nextcloud credentials before storing them. ', 'clone-master' ),
+                            __( 'To enable it, add ', 'clone-master' ),
+                            h( 'code', null, 'extension=openssl' ),
+                            ' dans votre ',
+                            h( 'code', null, 'php.ini' ),
+                            ' or contact your host. In the meantime, only local storage is available.'
+                        )
+                    ),
+
+                    /* ── Local storage hint + alerte Nginx ── */
+                    settings.storage_driver === 'local' && h( 'div', null,
+                        h( 'small', { className: 'wpcm-hint' },
+                            __( 'Backups are stored in ', 'clone-master' ), h( 'code', null, 'wp-content/wpcm-backups/' ), ' ' + __( 'on this server.', 'clone-master' )
+                        ),
+                        /* Nginx warning — .htaccess est ignoré, le dossier peut être public */
+                        SERVER_TYPE === 'nginx' && h( 'div', { className: 'wpcm-notice wpcm-notice-warning', style: { marginTop: 10 } },
+                            h( 'svg', { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', style: { verticalAlign: 'middle', marginRight: 6, flexShrink: 0 } },
+                                h( 'path', { d: 'M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z' } ),
+                                h( 'line', { x1: 12, y1: 9, x2: 12, y2: 13 } ),
+                                h( 'line', { x1: 12, y1: 17, x2: '12.01', y2: 17 } )
+                            ),
+                            h( 'div', null,
+                                h( 'strong', null, 'Nginx detected — backup folder potentially public' ),
+                                h( 'br' ),
+                                __( 'Nginx ignores ', 'clone-master' ),
+                                h( 'code', null, '.htaccess' ),
+                                __( ' files. The directory ', 'clone-master' ),
+                                h( 'code', null, 'wp-content/wpcm-backups/' ),
+                                ' may be publicly accessible, allowing anyone to download your archives. ',
+                                h( 'strong', null, __( 'Add this block to your Nginx configuration and reload it:', 'clone-master' ) ),
+                                h( 'pre', { className: 'wpcm-code-block', style: { marginTop: 8 } },
+                                    'location ~* ^/wp-content/wpcm-backups/ {\n    deny all;\n    return 403;\n}'
+                                )
+                            )
+                        )
                     ),
 
                     /* ── Nextcloud panel ── */
@@ -532,7 +590,7 @@
                         /* STATE 1 — Disconnected: URL input + connect button */
                         ncStatus === 'disconnected' && h( 'div', null,
                             h( 'p', { className: 'wpcm-nc-intro' },
-                                'Connectez-vous à votre Nextcloud en un clic. Une fenêtre s\'ouvrira pour que vous puissiez autoriser l\'accès — aucun mot de passe n\'est saisi ici.'
+                                __( 'Connect to your Nextcloud in one click. A window will open for you to authorise access — no password is entered here.', 'clone-master' )
                             ),
                             h( 'div', { className: 'wpcm-nc-connect-row' },
                                 h( 'input', {
@@ -550,7 +608,7 @@
                                     h( 'svg', { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', style: { verticalAlign: 'middle', marginRight: 5 } },
                                         h( 'path', { d: 'M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z' } )
                                     ),
-                                    'Connecter Nextcloud'
+                                    __( 'Connect to Nextcloud', 'clone-master' )
                                 )
                             ),
                             ncFlowError && h( 'div', { className: 'wpcm-nc-error' },
@@ -563,10 +621,10 @@
                             h( 'div', { className: 'wpcm-nc-waiting-inner' },
                                 h( 'span', { className: 'wpcm-spinner wpcm-spinner-lg' } ),
                                 h( 'div', null,
-                                    h( 'strong', null, 'En attente de votre autorisation…' ),
+                                    h( 'strong', null, __( 'Waiting for authorisation…', 'clone-master' ) ),
                                     h( 'br' ),
                                     h( 'span', { style: { fontSize: 13, color: 'var(--color-text-secondary)' } },
-                                        'Connectez-vous à Nextcloud dans la fenêtre qui vient de s\'ouvrir, puis cliquez sur « Autoriser ».'
+                                        __( 'Log in to Nextcloud in the window that just opened, then click \'Authorise\'.', 'clone-master' )
                                     )
                                 )
                             ),
@@ -583,7 +641,7 @@
                             h( 'div', { className: 'wpcm-nc-connected-badge' },
                                 h( 'span', { className: 'wpcm-nc-check' }, h( Ico, { n: 'check', s: 16 } ) ),
                                 h( 'div', null,
-                                    h( 'strong', null, 'Connecté à Nextcloud' ),
+                                    h( 'strong', null, __( 'Connected to Nextcloud', 'clone-master' ) ),
                                     h( 'br' ),
                                     h( 'span', { style: { fontSize: 12, color: 'var(--color-text-secondary)' } },
                                         ncUser, ' — ', ncServer
@@ -594,7 +652,7 @@
                                     className: 'wpcm-btn wpcm-btn-ghost wpcm-btn-danger',
                                     style:     { marginLeft: 'auto' },
                                     onClick:   disconnectNc
-                                }, 'Déconnecter' )
+                                }, __( 'Disconnect', 'clone-master' ) )
                             ),
 
                             /* Remote path */
@@ -607,7 +665,7 @@
                                     value:       settings.nextcloud_path,
                                     onChange:    function ( e ) { set( 'nextcloud_path', e.target.value ); }
                                 } ),
-                                h( 'small', { className: 'wpcm-hint' }, 'Le dossier sera créé automatiquement s\'il n\'existe pas.' )
+                                h( 'small', { className: 'wpcm-hint' }, __( 'The folder will be created automatically if it does not exist.', 'clone-master' ) )
                             ),
 
                             /* Keep-local toggle */
@@ -618,7 +676,7 @@
                                     onChange: function ( e ) { set( 'nextcloud_keep_local', e.target.checked ); }
                                 } ),
                                 h( 'span', { className: 'wpcm-toggle-slider' } ),
-                                ' Conserver aussi une copie locale après l\'envoi'
+                                ' ' + __( 'Also keep a local copy after upload', 'clone-master' )
                             )
                         )
                     )
@@ -630,7 +688,7 @@
                         className: 'wpcm-btn wpcm-btn-primary',
                         disabled:  saving,
                         onClick:   saveSettings
-                    }, h( Ico, { n: 'save', s: 15 } ), saving ? ' Sauvegarde…' : ' Sauvegarder' ),
+                    }, h( Ico, { n: 'save', s: 15 } ), saving ? ' ' + __( 'Saving…', 'clone-master' ) : ' ' + __( 'Save settings', 'clone-master' ) ),
 
                     h( 'button', {
                         className: 'wpcm-btn wpcm-btn-secondary',
@@ -642,7 +700,7 @@
                             h( 'span', { className: 'wpcm-spinner' } ),
                             h( RunningTimer )
                           )
-                        : h( Fragment, null, h( Ico, { n: 'play', s: 15 } ), ' Lancer maintenant' )
+                        : h( Fragment, null, h( Ico, { n: 'play', s: 15 } ), __( ' Run now', 'clone-master' ) )
                     )
                 ),
 
@@ -662,37 +720,37 @@
             h( 'div', { className: 'wpcm-card', style: { marginTop: 20 } },
                 h( 'div', { className: 'wpcm-card-header-row' },
                     h( 'h3', { className: 'wpcm-card-title', style: { margin: 0 } },
-                        h( Ico, { n: 'info' } ), ' Historique des sauvegardes'
+                        h( Ico, { n: 'info' } ), __( ' Backup history', 'clone-master' )
                     ),
                     h( 'div', { style: { display: 'flex', gap: 8 } },
                         h( 'button', {
                             className: 'wpcm-btn wpcm-btn-ghost',
                             onClick:   loadHistory,
-                            title:     'Actualiser'
+                            title:     __( 'Refresh', 'clone-master' )
                         }, h( Ico, { n: 'refresh', s: 15 } ) ),
                         history.length > 0 && h( 'button', {
                             className: 'wpcm-btn wpcm-btn-ghost wpcm-btn-danger',
                             onClick:   clearHistory,
-                            title:     'Effacer l\'historique'
+                            title:     __( 'Clear history', 'clone-master' )
                         }, h( Ico, { n: 'trash', s: 15 } ) )
                     )
                 ),
 
                 histLoading
-                    ? h( 'div', { className: 'wpcm-loading-row' }, h( 'span', { className: 'wpcm-spinner' } ), ' Chargement…' )
+                    ? h( 'div', { className: 'wpcm-loading-row' }, h( 'span', { className: 'wpcm-spinner' } ), ' Loading…' )
                     : history.length === 0
-                        ? h( 'div', { className: 'wpcm-empty-state' }, 'Aucune sauvegarde dans l\'historique.' )
+                        ? h( 'div', { className: 'wpcm-empty-state' }, __( 'No backups in history.', 'clone-master' ) )
                         : h( 'div', { className: 'wpcm-table-wrap' },
                             h( 'table', { className: 'wpcm-table wpcm-history-table' },
                                 h( 'thead', null,
                                     h( 'tr', null,
-                                        h( 'th', null, 'Date' ),
-                                        h( 'th', null, 'Déclencheur' ),
-                                        h( 'th', null, 'Statut' ),
-                                        h( 'th', null, 'Durée' ),
-                                        h( 'th', null, 'Taille' ),
-                                        h( 'th', null, 'Stockage' ),
-                                        h( 'th', null, 'Fichier / Erreur' )
+                                        h( 'th', null, __( 'Date', 'clone-master' ) ),
+                                        h( 'th', null, __( 'Trigger', 'clone-master' ) ),
+                                        h( 'th', null, __( 'Status', 'clone-master' ) ),
+                                        h( 'th', null, __( 'Duration', 'clone-master' ) ),
+                                        h( 'th', null, __( 'Size', 'clone-master' ) ),
+                                        h( 'th', null, __( 'Storage', 'clone-master' ) ),
+                                        h( 'th', null, __( 'File / Error', 'clone-master' ) )
                                     )
                                 ),
                                 h( 'tbody', null,
@@ -709,8 +767,8 @@
                                             ),
                                             h( 'td', null,
                                                 isOk
-                                                    ? h( 'span', { className: 'wpcm-status-ok' }, h( Ico, { n: 'check', s: 14 } ), ' Succès' )
-                                                    : h( 'span', { className: 'wpcm-status-err' }, h( Ico, { n: 'x', s: 14 } ), ' Échec' )
+                                                    ? h( 'span', { className: 'wpcm-status-ok' }, h( Ico, { n: 'check', s: 14 } ), __( ' Success', 'clone-master' ) )
+                                                    : h( 'span', { className: 'wpcm-status-err' }, h( Ico, { n: 'x', s: 14 } ), ' Failure' )
                                             ),
                                             h( 'td', null, formatDuration( e.duration_sec ) ),
                                             h( 'td', null, e.size_human || '—' ),
@@ -728,7 +786,7 @@
                                             h( 'td', { className: 'wpcm-td-detail' },
                                                 isOk
                                                     ? h( 'span', { className: 'wpcm-filename', title: e.filename }, e.filename || '—' )
-                                                    : h( 'span', { className: 'wpcm-error-msg', title: e.error || '' }, e.error || 'Erreur inconnue' )
+                                                    : h( 'span', { className: 'wpcm-error-msg', title: e.error || '' }, e.error || __( 'Unknown error', 'clone-master' ) )
                                             )
                                         );
                                     } )
@@ -786,7 +844,7 @@
         btn.id         = 'wpcm-tab-schedule';
         btn.innerHTML  =
             '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle;flex-shrink:0"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' +
-            '<span class="tab-lbl"> Planification</span>';
+            '<span class="tab-lbl"> ' + __( 'Schedule', 'clone-master' ) + '</span>';
         tabsBar.appendChild( btn );
 
         // ── Inject panel inside .wpcm-app (same container as React panels) ─
@@ -847,12 +905,14 @@
             /* Form layout */
             '.wpcm-form-row { margin-bottom: 18px; }',
             '.wpcm-form-label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; color: var(--color-text-primary); }',
-            '.wpcm-toggle-label { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; user-select: none; }',
+            '.wpcm-toggle-label { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; user-select: none; }',
             '.wpcm-toggle-label input[type=checkbox] { display: none; }',
-            '.wpcm-toggle-slider { position: relative; width: 38px; height: 22px; background: var(--color-border-primary); border-radius: 11px; transition: background .2s; flex-shrink: 0; }',
-            '.wpcm-toggle-slider::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform .2s; }',
-            '.wpcm-toggle-label input:checked + .wpcm-toggle-slider { background: #2271b1; }',
-            '.wpcm-toggle-label input:checked + .wpcm-toggle-slider::after { transform: translateX(16px); }',
+            '.wpcm-toggle-slider { position: relative; width: 44px; height: 24px; background: #d1d5e0; border-radius: 12px; transition: background .25s ease, box-shadow .25s ease; flex-shrink: 0; box-sizing: border-box; box-shadow: inset 0 1px 3px rgba(0,0,0,0.15); }',
+            '.wpcm-toggle-slider::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; background: #fff; border-radius: 50%; transition: transform .25s cubic-bezier(.4,0,.2,1), box-shadow .25s ease; box-shadow: 0 1px 4px rgba(0,0,0,0.25); }',
+            '.wpcm-toggle-label:hover .wpcm-toggle-slider { background: #b8bdd0; }',
+            '.wpcm-toggle-label input:checked + .wpcm-toggle-slider { background: #2c5ff6; box-shadow: inset 0 1px 3px rgba(44,95,246,0.3), 0 0 0 3px rgba(44,95,246,0.12); }',
+            '.wpcm-toggle-label input:checked + .wpcm-toggle-slider::after { transform: translateX(20px); box-shadow: 0 1px 4px rgba(0,0,0,0.2); }',
+            '.wpcm-toggle-label:hover input:checked + .wpcm-toggle-slider { background: #1e4de0; }',
             '.wpcm-select { padding: 7px 10px; border: 1px solid var(--color-border-secondary); border-radius: 6px; font-size: 13px; background: var(--color-background-primary); color: var(--color-text-primary); }',
             '.wpcm-select-small { padding: 7px 8px; font-size: 12px; }',
             '.wpcm-input-number { width: 64px; padding: 7px 8px; border: 1px solid var(--color-border-secondary); border-radius: 6px; font-size: 13px; text-align: center; background: var(--color-background-primary); color: var(--color-text-primary); }',
@@ -924,6 +984,23 @@
             '.wpcm-storage-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; padding: 2px 7px; border-radius: 10px; font-weight: 500; white-space: nowrap; }',
             '.wpcm-storage-ok  { background: #e8f4fd; color: #1a6fa3; }',
             '.wpcm-storage-err { background: #fdecea; color: #c0392b; }',
+
+            /* Disabled driver button (OpenSSL absent → Nextcloud unavailable) */
+            '.wpcm-driver-btn-disabled { opacity: .42; cursor: not-allowed !important; filter: grayscale(1); }',
+            '.wpcm-driver-btn-disabled:hover { border-color: var(--color-border-secondary) !important; color: var(--color-text-secondary) !important; background: var(--color-background-primary) !important; }',
+
+            /* Notice banners — error (red) and warning (orange) */
+            '.wpcm-notice { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 8px; font-size: 12.5px; line-height: 1.55; margin-top: 10px; }',
+            '.wpcm-notice code { font-size: 11.5px; background: rgba(0,0,0,.07); padding: 1px 4px; border-radius: 3px; }',
+            '.wpcm-notice strong { display: block; margin-bottom: 3px; font-size: 13px; }',
+            '.wpcm-notice svg { margin-top: 1px; flex-shrink: 0; }',
+            '.wpcm-notice-error   { background: #fef2f2; border: 1px solid #fca5a5; color: #7f1d1d; }',
+            '.wpcm-notice-error   svg { color: #dc2626; }',
+            '.wpcm-notice-warning { background: #fffbeb; border: 1px solid #fcd34d; color: #78350f; }',
+            '.wpcm-notice-warning svg { color: #d97706; }',
+
+            /* Nginx config snippet inside the warning banner */
+            '.wpcm-code-block { font-family: monospace; font-size: 11.5px; background: rgba(0,0,0,.06); border: 1px solid rgba(0,0,0,.1); border-radius: 5px; padding: 8px 12px; white-space: pre; overflow-x: auto; line-height: 1.6; color: #1c1917; }',
         ].join( '\n' );
         document.head.appendChild( style );
     }

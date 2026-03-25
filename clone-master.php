@@ -1,12 +1,15 @@
 <?php
 /**
- * Plugin Name: WP Clone Master
- * Plugin URI: https://github.com/wp-clone-master
+ * Plugin Name: Clone Master
+ * Plugin URI: https://github.com/Assistouest/clone-master
  * Description: Clone, migrate and backup your entire WordPress site with intelligent URL replacement and adaptive chunking.
- * Version: 1.0.0
- * Author: WP Clone Master
- * License: GPL v2 or later
- * Text Domain: wp-clone-master
+ * Version: 1.1.0
+ * Author: Adrien Piron
+ * Author URI: https://profiles.wordpress.org/adrienpiron/
+ * License: GPL v3 or later
+ * License URI: https://www.gnu.org/licenses/gpl-3.0.html
+ * Text Domain: clone-master
+ * Domain Path: /languages
  * Requires PHP: 7.4
  * Requires at least: 5.6
  */
@@ -15,7 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'WPCM_VERSION', '1.0.0' );
+define( 'WPCM_VERSION', '1.1.0' );
 define( 'WPCM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPCM_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'WPCM_BACKUP_DIR', WP_CONTENT_DIR . '/wpcm-backups/' );
@@ -33,9 +36,9 @@ spl_autoload_register( function( $class ) {
 /**
  * Main Plugin Class
  */
-if ( ! class_exists( 'WP_Clone_Master' ) ) :
+if ( ! class_exists( 'WPCM_Plugin' ) ) :
 
-class WP_Clone_Master {
+class WPCM_Plugin {
 
     private static $instance = null;
 
@@ -61,6 +64,12 @@ class WP_Clone_Master {
         add_action( 'init', [ $this, 'init' ] );
         add_action( 'admin_menu', [ $this, 'admin_menu' ] );
         add_action( 'admin_enqueue_scripts', [ $this, 'admin_assets' ] );
+
+        // ── JS i18n — load JSON translation files by handle name so the path ──
+        // works regardless of the WordPress install location (ABSPATH may vary).
+        add_filter( 'pre_load_script_translations', [ $this, 'load_script_translations' ], 10, 3 );
+        // Failsafe: inject setLocaleData() inline AFTER scripts are enqueued (priority 20)
+        add_action( 'admin_enqueue_scripts', [ $this, 'inject_inline_translations' ], 20 );
 
         // ── Noindex enforcement ────────────────────────────────────────────────
         // wpcm_noindex is set to '1' by the standalone installer when block_indexing
@@ -114,6 +123,96 @@ class WP_Clone_Master {
         add_action( 'wp_ajax_wpcm_nc_init_flow',       [ $this, 'ajax_nc_init_flow' ] );
         add_action( 'wp_ajax_wpcm_nc_poll_flow',       [ $this, 'ajax_nc_poll_flow' ] );
         add_action( 'wp_ajax_wpcm_nc_disconnect',      [ $this, 'ajax_nc_disconnect' ] );
+    }
+
+    /**
+     * Serve the JED translation JSON for our two JS handles.
+     *
+     * WordPress normally looks for files named like:
+     *   {locale}-{handle}-{md5(src_url)}.json
+     * inside WP_LANG_DIR/plugins/. That path is not writable on many hosts,
+     * and the md5 changes whenever the plugin URL changes.
+     *
+     * This filter intercepts early and loads our own JSON from the plugin's
+     * languages/ folder, keyed simply by handle slug.
+     *
+     * @param string|null $translations  Null = not yet loaded.
+     * @param string      $file          Computed file path (ignored).
+     * @param string      $handle        Script handle.
+     * @return string|null  Raw JED JSON, or null to let WP try its default path.
+     */
+    /**
+     * Intercept wp_set_script_translations() file lookup and serve our own JSON.
+     * We return the file content directly so WP never needs to resolve the path itself.
+     *
+     * @param string|null $translations  Current content (null = not loaded yet).
+     * @param string      $file          Computed path (ignored).
+     * @param string      $handle        Enqueued script handle.
+     * @return string|null  JED JSON string, or original $translations.
+     */
+    public function load_script_translations( $translations, $file, $handle ) {
+        $map = [
+            'wpcm-admin'    => 'clone-master-admin',
+            'wpcm-schedule' => 'clone-master-schedule',
+        ];
+
+        if ( ! isset( $map[ $handle ] ) ) {
+            return $translations;
+        }
+
+        $locale = determine_locale();
+        $base   = WPCM_PLUGIN_DIR . 'languages/' . $map[ $handle ];
+
+        foreach ( [ $base . '-' . $locale . '.json', $base . '.json' ] as $path ) {
+            if ( file_exists( $path ) ) {
+                $content = file_get_contents( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+                if ( false !== $content && '' !== $content ) {
+                    return $content;
+                }
+            }
+        }
+
+        return $translations;
+    }
+
+    /**
+     * Inline-script failsafe: inject setLocaleData() before the component code runs.
+     * This guarantees wp.i18n.__() returns translated strings even if the filter
+     * fired after the script was already compiled/cached by the browser.
+     *
+     * Called via admin_enqueue_scripts (priority 20, after our scripts are enqueued).
+     */
+    public function inject_inline_translations() {
+        $locale = determine_locale();
+        if ( 'en_US' === $locale || '' === $locale ) {
+            return;
+        }
+
+        $map = [
+            'wpcm-admin'    => 'clone-master-admin',
+            'wpcm-schedule' => 'clone-master-schedule',
+        ];
+
+        foreach ( $map as $handle => $slug ) {
+            if ( ! wp_script_is( $handle, 'enqueued' ) ) {
+                continue;
+            }
+            $path = WPCM_PLUGIN_DIR . 'languages/' . $slug . '-' . $locale . '.json';
+            if ( ! file_exists( $path ) ) {
+                continue;
+            }
+            $json = file_get_contents( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+            if ( ! $json ) {
+                continue;
+            }
+            $decoded = json_decode( $json, true );
+            $messages = isset( $decoded['locale_data']['messages'] ) ? $decoded['locale_data']['messages'] : [];
+            $js = sprintf(
+                'if(window.wp&&wp.i18n){wp.i18n.setLocaleData(%s,"clone-master");}',
+                wp_json_encode( $messages )
+            );
+            wp_add_inline_script( $handle, $js, 'before' );
+        }
     }
 
     public function activate() {
@@ -177,7 +276,7 @@ class WP_Clone_Master {
         if ( ! file_exists( $nginx_readme ) ) {
             $rel = str_replace( ABSPATH, '', $dir );
             file_put_contents( $nginx_readme, implode( "\n", [
-                'WP Clone Master — Nginx protection required',
+                'Clone Master — Nginx protection required',
                 '===========================================',
                 'Nginx ignores .htaccess files. Add the following block to your',
                 'server { } configuration to block public access to this directory:',
@@ -205,15 +304,17 @@ class WP_Clone_Master {
     }
 
     public function init() {
-        load_plugin_textdomain( 'wp-clone-master', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
+        // load_plugin_textdomain() is not needed since WordPress 4.6.
+        // WordPress.org automatically loads translations from the plugin's
+        // /languages/ directory. Calling it manually triggers a PCP warning.
     }
 
     public function admin_menu() {
         add_menu_page(
-            __( 'WP Clone Master', 'wp-clone-master' ),
-            __( 'Clone Master', 'wp-clone-master' ),
+            __( 'Clone Master', 'clone-master' ),
+            __( 'Clone Master', 'clone-master' ),
             'manage_options',
-            'wp-clone-master',
+            'clone-master',
             [ $this, 'render_admin_page' ],
             'dashicons-database-export',
             80
@@ -221,42 +322,56 @@ class WP_Clone_Master {
     }
 
     public function admin_assets( $hook ) {
-        if ( $hook !== 'toplevel_page_wp-clone-master' ) return;
+        if ( $hook !== 'toplevel_page_clone-master' ) return;
 
         // Use file modification time as version to bust browser cache on every update
         $css_ver = WPCM_VERSION . '.' . filemtime( WPCM_PLUGIN_DIR . 'admin/css/admin.css' );
         $js_ver  = WPCM_VERSION . '.' . filemtime( WPCM_PLUGIN_DIR . 'admin/js/admin.js' );
 
         wp_enqueue_style( 'wpcm-admin', WPCM_PLUGIN_URL . 'admin/css/admin.css', [], $css_ver );
-        wp_enqueue_script( 'wpcm-admin', WPCM_PLUGIN_URL . 'admin/js/admin.js', [ 'jquery', 'wp-element', 'wp-components', 'wp-api-fetch' ], $js_ver, true );
+        wp_enqueue_script( 'wpcm-admin', WPCM_PLUGIN_URL . 'admin/js/admin.js', [ 'wp-element', 'wp-components', 'wp-api-fetch', 'wp-i18n' ], $js_ver, true );
+        wp_set_script_translations( 'wpcm-admin', 'clone-master', WPCM_PLUGIN_DIR . 'languages' );
 
         // Schedule tab — loaded after admin.js, adds the ScheduleTab component
         $sched_ver = WPCM_VERSION . '.' . filemtime( WPCM_PLUGIN_DIR . 'admin/js/schedule-tab.js' );
-        wp_enqueue_script( 'wpcm-schedule', WPCM_PLUGIN_URL . 'admin/js/schedule-tab.js', [ 'wpcm-admin' ], $sched_ver, true );
+        wp_enqueue_script( 'wpcm-schedule', WPCM_PLUGIN_URL . 'admin/js/schedule-tab.js', [ 'wpcm-admin', 'wp-i18n' ], $sched_ver, true );
+        wp_set_script_translations( 'wpcm-schedule', 'clone-master', WPCM_PLUGIN_DIR . 'languages' );
 
         // Next scheduled run (resolved server-side so it's accurate regardless of timezone)
         $next_ts  = $this->scheduler->get_next_run();
         $settings = new WPCM_Backup_Settings();
 
+        // Detect server type from SERVER_SOFTWARE for the Nginx backup-exposure warning.
+        $server_software = sanitize_text_field( wp_unslash( $_SERVER['SERVER_SOFTWARE'] ?? '' ) );
+        $server_type     = 'unknown';
+        if ( stripos( $server_software, 'nginx' )     !== false ) $server_type = 'nginx';
+        elseif ( stripos( $server_software, 'apache' )    !== false ) $server_type = 'apache';
+        elseif ( stripos( $server_software, 'litespeed' ) !== false ) $server_type = 'litespeed';
+
         wp_localize_script( 'wpcm-admin', 'wpcmData', [
-            'ajaxUrl'   => admin_url( 'admin-ajax.php' ),
-            'nonce'     => wp_create_nonce( 'wpcm_nonce' ),
-            'restUrl'   => rest_url( 'wpcm/v1/' ),
-            'restNonce' => wp_create_nonce( 'wp_rest' ),
-            'siteUrl'   => site_url(),
-            'homeUrl'   => home_url(),
-            'pluginUrl' => WPCM_PLUGIN_URL,
-            'maxUpload' => wp_max_upload_size(),
-            'schedule'  => array_merge( $settings->to_array(), [
+            'ajaxUrl'    => admin_url( 'admin-ajax.php' ),
+            'nonce'      => wp_create_nonce( 'wpcm_nonce' ),
+            'restUrl'    => rest_url( 'wpcm/v1/' ),
+            'restNonce'  => wp_create_nonce( 'wp_rest' ),
+            'siteUrl'    => site_url(),
+            'homeUrl'    => home_url(),
+            'pluginUrl'  => WPCM_PLUGIN_URL,
+            'maxUpload'  => wp_max_upload_size(),
+            // Passed to the schedule tab so it can disable Nextcloud when OpenSSL is absent
+            // and warn the user that backup directories may be publicly reachable on Nginx.
+            'hasOpenssl' => extension_loaded( 'openssl' ),
+            'serverType' => $server_type,
+            'schedule'   => array_merge( $settings->to_array(), [
                 'next_run'        => $next_ts,
-                'next_run_human'  => $next_ts ? wp_date( 'D d M Y à H:i', $next_ts ) : null,
+                'next_run_human'  => $next_ts ? wp_date( 'D d M Y, H:i', $next_ts ) : null,
                 'cron_disabled'   => defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON,
             ] ),
-            'i18n'      => [
-                'exporting'  => __( 'Exporting...', 'wp-clone-master' ),
-                'importing'  => __( 'Importing...', 'wp-clone-master' ),
-                'success'    => __( 'Operation completed successfully!', 'wp-clone-master' ),
-                'error'      => __( 'An error occurred.', 'wp-clone-master' ),
+            'i18n'       => [
+                'exporting'  => __( 'Exporting...', 'clone-master' ),
+                'importing'  => __( 'Importing...', 'clone-master' ),
+                'success'    => __( 'Operation completed successfully!', 'clone-master' ),
+                'error'      => __( 'An error occurred.', 'clone-master' ),
+                'supportUs'  => __( 'Support open-source', 'clone-master' ),
             ],
         ]);
     }
@@ -284,11 +399,11 @@ class WP_Clone_Master {
         if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorized' );
 
         // Increase limits
-        @set_time_limit( 300 );
-        @ini_set( 'memory_limit', '512M' );
+        @set_time_limit( 300 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required to prevent timeout during large exports/imports
+        @ini_set( 'memory_limit', '512M' ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required for large site processing
 
-        $step = isset( $_POST['step'] ) ? sanitize_text_field( $_POST['step'] ) : 'init';
-        $session_id = isset( $_POST['session_id'] ) ? sanitize_text_field( $_POST['session_id'] ) : '';
+        $step = isset( $_POST['step'] ) ? sanitize_text_field( wp_unslash( $_POST['step'] ) ) : 'init';
+        $session_id = isset( $_POST['session_id'] ) ? sanitize_text_field( wp_unslash( $_POST['session_id'] ) ) : '';
 
         $exporter = new WPCM_Exporter();
 
@@ -307,17 +422,17 @@ class WP_Clone_Master {
         check_ajax_referer( 'wpcm_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorized' );
 
-        @set_time_limit( 300 );
+        @set_time_limit( 300 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required to prevent timeout during large exports/imports
 
         if ( empty( $_FILES['backup_chunk'] ) && empty( $_FILES['backup_file'] ) ) {
             wp_send_json_error( [ 'message' => 'No file uploaded' ] );
         }
 
         // Check if this is a chunked upload
-        $chunk_index  = isset( $_POST['chunk_index'] ) ? (int) $_POST['chunk_index'] : -1;
-        $total_chunks = isset( $_POST['total_chunks'] ) ? (int) $_POST['total_chunks'] : -1;
-        $file_name    = isset( $_POST['file_name'] ) ? sanitize_file_name( $_POST['file_name'] ) : '';
-        $upload_id    = isset( $_POST['upload_id'] ) ? sanitize_file_name( $_POST['upload_id'] ) : '';
+        $chunk_index  = isset( $_POST['chunk_index'] ) ? (int) sanitize_text_field( wp_unslash( $_POST['chunk_index'] ) ) : -1;
+        $total_chunks = isset( $_POST['total_chunks'] ) ? (int) sanitize_text_field( wp_unslash( $_POST['total_chunks'] ) ) : -1;
+        $file_name    = isset( $_POST['file_name'] ) ? sanitize_file_name( wp_unslash( $_POST['file_name'] ) ) : '';
+        $upload_id    = isset( $_POST['upload_id'] ) ? sanitize_file_name( wp_unslash( $_POST['upload_id'] ) ) : '';
 
         if ( $chunk_index >= 0 && $total_chunks > 0 ) {
             // CHUNKED UPLOAD MODE
@@ -342,21 +457,38 @@ class WP_Clone_Master {
             self::protect_directory( $upload_dir );
 
             $dest  = $upload_dir . $file_name;
-            $chunk = $_FILES['backup_chunk'];
+            $chunk = $_FILES['backup_chunk']; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- $_FILES arrays are handled via move_uploaded_file/fopen, not echoed
+
+            // ── Validate that the chunk is a genuine PHP upload (defence-in-depth) ──
+            // is_uploaded_file() verifies the file was uploaded via HTTP POST in this request.
+            // move_uploaded_file() includes this check internally; fopen() does not.
+            if ( empty( $chunk['tmp_name'] ) || ! is_uploaded_file( $chunk['tmp_name'] ) ) {
+                wp_send_json_error( [ 'message' => 'Invalid upload: chunk ' . $chunk_index . ' is not a valid uploaded file.' ] );
+            }
+
+            // ── Magic bytes check — first chunk only ─────────────────────────────────
+            // Extension check already ran above. On the first chunk (offset 0) we also
+            // verify the ZIP magic bytes PK\x03\x04 to reject non-ZIP files renamed .zip.
+            if ( $chunk_index === 0 ) {
+                $magic = file_get_contents( $chunk['tmp_name'], false, null, 0, 4 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_get_contents -- Reading 4 bytes for magic-byte validation; WP_Filesystem has no equivalent
+                if ( $magic !== "PK\x03\x04" ) {
+                    wp_send_json_error( [ 'message' => 'Invalid file: not a valid ZIP archive (magic bytes check failed).' ] );
+                }
+            }
 
             // Append chunk to destination file
-            $in  = fopen( $chunk['tmp_name'], 'rb' );
-            $out = fopen( $dest, $chunk_index === 0 ? 'wb' : 'ab' );
+            $in  = fopen( $chunk['tmp_name'], 'rb' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Chunked binary upload; WP_Filesystem does not support binary chunked writes
+            $out = fopen( $dest, $chunk_index === 0 ? 'wb' : 'ab' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Chunked binary upload append mode
 
             if ( ! $in || ! $out ) {
                 wp_send_json_error( [ 'message' => 'Failed to write chunk ' . $chunk_index ] );
             }
 
-            while ( $data = fread( $in, 8 * 1024 * 1024 ) ) {
-                fwrite( $out, $data );
+            while ( $data = fread( $in, 8 * 1024 * 1024 ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fread
+                fwrite( $out, $data ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
             }
-            fclose( $in );
-            fclose( $out );
+            fclose( $in ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+            fclose( $out ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
 
             $is_last = ( $chunk_index + 1 >= $total_chunks );
 
@@ -375,11 +507,17 @@ class WP_Clone_Master {
         }
 
         // SINGLE FILE UPLOAD (small files — fallback)
-        $file = $_FILES['backup_file'];
+        $file = $_FILES['backup_file']; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- $_FILES handled via move_uploaded_file with file-type whitelist
 
         // ── File-type whitelist (single-upload path) ──────────────────────────
         if ( strtolower( pathinfo( $file['name'], PATHINFO_EXTENSION ) ) !== 'zip' ) {
             wp_send_json_error( [ 'message' => 'Invalid file type. Only .zip backup archives are accepted.' ] );
+        }
+        // ── Magic bytes check ─────────────────────────────────────────────────
+        // Verify the ZIP magic bytes PK\x03\x04 to reject non-ZIP files renamed .zip.
+        $magic = file_get_contents( $file['tmp_name'], false, null, 0, 4 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_get_contents -- Reading 4 bytes for magic-byte validation
+        if ( $magic !== "PK\x03\x04" ) {
+            wp_send_json_error( [ 'message' => 'Invalid file: not a valid ZIP archive (magic bytes check failed).' ] );
         }
         // ─────────────────────────────────────────────────────────────────────
 
@@ -388,7 +526,7 @@ class WP_Clone_Master {
         self::protect_directory( $upload_dir );
 
         $dest = $upload_dir . sanitize_file_name( $file['name'] );
-        if ( ! move_uploaded_file( $file['tmp_name'], $dest ) ) {
+        if ( ! move_uploaded_file( $file['tmp_name'], $dest ) ) { // phpcs:ignore Generic.PHP.ForbiddenFunctions.Found -- move_uploaded_file() is required for secure file upload handling; WP_Filesystem has no equivalent
             wp_send_json_error( [ 'message' => 'Failed to move uploaded file' ] );
         }
 
@@ -407,15 +545,15 @@ class WP_Clone_Master {
         check_ajax_referer( 'wpcm_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorized' );
 
-        @set_time_limit( 300 );
-        @ini_set( 'memory_limit', '512M' );
+        @set_time_limit( 300 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required to prevent timeout during large exports/imports
+        @ini_set( 'memory_limit', '512M' ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required for large site processing
 
-        $step        = isset( $_POST['step'] ) ? sanitize_text_field( $_POST['step'] ) : 'extract';
-        $session_id  = isset( $_POST['session_id'] ) ? sanitize_text_field( $_POST['session_id'] ) : '';
-        $new_url     = isset( $_POST['new_url'] ) ? esc_url_raw( $_POST['new_url'] ) : '';
+        $step        = isset( $_POST['step'] ) ? sanitize_text_field( wp_unslash( $_POST['step'] ) ) : 'extract';
+        $session_id  = isset( $_POST['session_id'] ) ? sanitize_text_field( wp_unslash( $_POST['session_id'] ) ) : '';
+        $new_url     = isset( $_POST['new_url'] ) ? esc_url_raw( wp_unslash( $_POST['new_url'] ) ) : '';
         // import_opts is a JSON string sent by the JS (e.g. {"block_indexing":true,"reset_permalinks":true})
         // It was previously never read here — that was the root cause of block_indexing never working.
-        $import_opts = isset( $_POST['import_opts'] ) ? wp_unslash( $_POST['import_opts'] ) : '{}';
+        $import_opts = isset( $_POST['import_opts'] ) ? wp_unslash( $_POST['import_opts'] ) : '{}'; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- JSON string parsed by json_decode(); sanitize_textarea_field would corrupt JSON
 
         // ── file_path confinement ─────────────────────────────────────────────
         // $_POST['file_path'] is attacker-controlled. Without this check an admin
@@ -423,7 +561,7 @@ class WP_Clone_Master {
         // would open it as a ZIP archive.
         // We accept only paths that actually live inside WPCM_TEMP_DIR.
         $file_path = '';
-        if ( ! empty( $_POST['file_path'] ) ) {
+        if ( ! empty( $_POST['file_path'] ) ) { // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- confinement check only, value is sanitized below
             $raw_path      = sanitize_text_field( wp_unslash( $_POST['file_path'] ) );
             $real_temp_dir = realpath( WPCM_TEMP_DIR );
             // realpath() returns false for non-existent paths; use the raw path as
@@ -431,10 +569,24 @@ class WP_Clone_Master {
             // written yet (chunk 0) still resolves correctly.
             $real_given = realpath( $raw_path );
             $check_path = $real_given ? $real_given : $raw_path;
-            if ( $real_temp_dir && strpos( $check_path, $real_temp_dir ) === 0 ) {
+            if ( $real_temp_dir && strpos( $check_path, rtrim( $real_temp_dir, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR ) === 0 ) {
                 $file_path = $raw_path;
             } else {
                 wp_send_json_error( [ 'message' => 'Invalid file path.' ] );
+            }
+        } elseif ( ! empty( $_POST['backup_name'] ) ) {
+            // ── backup_name path: restore directly from WPCM_BACKUP_DIR ──────
+            // Used when the user clicks "Restaurer" in the Sauvegardes tab.
+            // The frontend passes only the filename (no absolute path), and we
+            // resolve it here, confined to WPCM_BACKUP_DIR.
+            $backup_name     = sanitize_file_name( wp_unslash( $_POST['backup_name'] ) ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash
+            $candidate       = WPCM_BACKUP_DIR . $backup_name;
+            $real_backup_dir = realpath( WPCM_BACKUP_DIR );
+            $real_candidate  = realpath( $candidate );
+            if ( $real_backup_dir && $real_candidate && strpos( $real_candidate, rtrim( $real_backup_dir, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR ) === 0 ) {
+                $file_path = $candidate;
+            } else {
+                wp_send_json_error( [ 'message' => 'Invalid backup name.' ] );
             }
         }
         // ─────────────────────────────────────────────────────────────────────
@@ -458,6 +610,15 @@ class WP_Clone_Master {
 
         $backups = [];
         if ( is_dir( WPCM_BACKUP_DIR ) ) {
+            // Build a filename → storage origin map from scheduler history
+            $history    = WPCM_Backup_Settings::get_history();
+            $origin_map = [];
+            foreach ( $history as $entry ) {
+                if ( ! empty( $entry['filename'] ) && ! empty( $entry['storage_driver'] ) ) {
+                    $origin_map[ $entry['filename'] ] = $entry['storage_driver'];
+                }
+            }
+
             $files = glob( WPCM_BACKUP_DIR . '*.zip' );
             foreach ( $files as $file ) {
                 $backups[] = [
@@ -465,6 +626,7 @@ class WP_Clone_Master {
                     'size'     => size_format( filesize( $file ) ),
                     'size_raw' => filesize( $file ),
                     'date'     => gmdate( 'Y-m-d H:i:s', filemtime( $file ) ),
+                    'origin'   => $origin_map[ basename( $file ) ] ?? __( 'Local storage', 'clone-master' ),
                     // 'path' intentionally omitted — the absolute server path is not
                     // needed by the frontend (all operations use backup_name) and
                     // exposing it would leak the server's directory layout.
@@ -485,11 +647,11 @@ class WP_Clone_Master {
         check_ajax_referer( 'wpcm_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorized' );
 
-        $name = isset( $_POST['backup_name'] ) ? sanitize_file_name( $_POST['backup_name'] ) : '';
+        $name = isset( $_POST['backup_name'] ) ? sanitize_file_name( wp_unslash( $_POST['backup_name'] ) ) : '';
         $path = WPCM_BACKUP_DIR . $name;
 
-        if ( file_exists( $path ) && strpos( realpath( $path ), realpath( WPCM_BACKUP_DIR ) ) === 0 ) {
-            unlink( $path );
+        if ( file_exists( $path ) && strpos( realpath( $path ), rtrim( realpath( WPCM_BACKUP_DIR ), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR ) === 0 ) {
+            wp_delete_file( $path );
             wp_send_json_success();
         }
         wp_send_json_error( [ 'message' => 'File not found' ] );
@@ -502,17 +664,17 @@ class WP_Clone_Master {
         check_ajax_referer( 'wpcm_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized' );
 
-        $name = isset( $_GET['backup_name'] ) ? sanitize_file_name( $_GET['backup_name'] ) : '';
+        $name = isset( $_GET['backup_name'] ) ? sanitize_file_name( wp_unslash( $_GET['backup_name'] ) ) : '';
         $path = WPCM_BACKUP_DIR . $name;
 
-        if ( ! file_exists( $path ) || strpos( realpath( $path ), realpath( WPCM_BACKUP_DIR ) ) !== 0 ) {
+        if ( ! file_exists( $path ) || strpos( realpath( $path ), rtrim( realpath( WPCM_BACKUP_DIR ), DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR ) !== 0 ) {
             wp_die( 'File not found' );
         }
 
         // Disable output buffering for streaming
         while ( ob_get_level() ) ob_end_clean();
-        @ini_set( 'zlib.output_compression', 'Off' );
-        @set_time_limit( 0 );
+        @ini_set( 'zlib.output_compression', 'Off' ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required for binary streaming
+        @set_time_limit( 0 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required for large file downloads
 
         $size = filesize( $path );
 
@@ -524,13 +686,13 @@ class WP_Clone_Master {
         header( 'Pragma: no-cache' );
 
         // Stream in 8MB chunks instead of readfile() which loads everything
-        $handle = fopen( $path, 'rb' );
+        $handle = fopen( $path, 'rb' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Binary file streaming for download
         if ( $handle ) {
             while ( ! feof( $handle ) ) {
-                echo fread( $handle, 8 * 1024 * 1024 );
+                echo fread( $handle, 8 * 1024 * 1024 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fread,WordPress.Security.EscapeOutput.OutputNotEscaped -- Binary ZIP streaming // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped,WordPress.WP.AlternativeFunctions.file_system_operations_fread -- Binary file streaming; escaping would corrupt ZIP data
                 flush();
             }
-            fclose( $handle );
+            fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
         }
         exit;
     }
@@ -551,7 +713,7 @@ class WP_Clone_Master {
 
         wp_send_json_success( array_merge( $settings->to_array(), [
             'next_run'       => $next_ts,
-            'next_run_human' => $next_ts ? wp_date( 'D d M Y à H:i', $next_ts ) : null,
+            'next_run_human' => $next_ts ? wp_date( 'D d M Y, H:i', $next_ts ) : null,
             'cron_disabled'  => defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON,
         ] ) );
     }
@@ -565,15 +727,15 @@ class WP_Clone_Master {
 
         $settings = new WPCM_Backup_Settings();
         $settings->save( [
-            'enabled'              => ! empty( $_POST['enabled'] ) && $_POST['enabled'] !== 'false',
-            'frequency'            => sanitize_text_field( $_POST['frequency']       ?? 'daily' ),
-            'retention_mode'       => sanitize_text_field( $_POST['retention_mode']  ?? 'count' ),
-            'retention_count'      => (int) ( $_POST['retention_count'] ?? 7 ),
-            'retention_days'       => (int) ( $_POST['retention_days']  ?? 30 ),
-            'notify_email'         => sanitize_email( $_POST['notify_email'] ?? '' ),
-            'notify_on'            => sanitize_text_field( $_POST['notify_on'] ?? 'error' ),
-            'storage_driver'       => sanitize_text_field( $_POST['storage_driver']       ?? 'local' ),
-            'nextcloud_path'       => sanitize_text_field( $_POST['nextcloud_path']       ?? 'Backups/WordPress' ),
+            'enabled'              => ! empty( $_POST['enabled'] ) && sanitize_text_field( wp_unslash( $_POST['enabled'] ) ) !== 'false',
+            'frequency'            => sanitize_text_field( wp_unslash( $_POST['frequency'] ?? 'daily' ) ),
+            'retention_mode'       => sanitize_text_field( wp_unslash( $_POST['retention_mode'] ?? 'count' ) ),
+            'retention_count'      => absint( wp_unslash( $_POST['retention_count'] ?? 7 ) ),
+            'retention_days'       => absint( wp_unslash( $_POST['retention_days'] ?? 30 ) ),
+            'notify_email'         => sanitize_email( wp_unslash( $_POST['notify_email'] ?? '' ) ),
+            'notify_on'            => sanitize_text_field( wp_unslash( $_POST['notify_on'] ?? 'error' ) ),
+            'storage_driver'       => sanitize_text_field( wp_unslash( $_POST['storage_driver'] ?? 'local' ) ),
+            'nextcloud_path'       => sanitize_text_field( wp_unslash( $_POST['nextcloud_path'] ?? 'Backups/WordPress' ) ),
             'nextcloud_keep_local' => ! empty( $_POST['nextcloud_keep_local'] ) && $_POST['nextcloud_keep_local'] !== 'false',
         ] );
 
@@ -583,9 +745,9 @@ class WP_Clone_Master {
 
         $next_ts = $this->scheduler->get_next_run();
         wp_send_json_success( [
-            'message'        => 'Paramètres sauvegardés.',
+            'message'        => 'Settings saved.',
             'next_run'       => $next_ts,
-            'next_run_human' => $next_ts ? wp_date( 'D d M Y à H:i', $next_ts ) : null,
+            'next_run_human' => $next_ts ? wp_date( 'D d M Y, H:i', $next_ts ) : null,
         ] );
     }
 
@@ -613,7 +775,7 @@ class WP_Clone_Master {
 
         // Refuse if a backup is already running
         if ( get_transient( WPCM_Scheduler::LOCK_KEY ) ) {
-            wp_send_json_error( [ 'message' => 'Une sauvegarde est déjà en cours. Patientez et rafraîchissez l\'historique.' ] );
+            wp_send_json_error( [ 'message' => 'A backup is already running. Please wait and refresh the history.' ] );
         }
 
         // The run_id format must match what WPCM_Scheduler::run_backup() produces
@@ -639,7 +801,7 @@ class WP_Clone_Master {
         header( 'Connection: close' );
         header( 'Cache-Control: no-cache' );
 
-        echo $body;
+        echo $body; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- $body is wp_json_encode() output; wp_kses_post() would corrupt JSON
 
         // PHP-FPM: tell the SAPI the response is done, keep the worker alive
         if ( function_exists( 'fastcgi_finish_request' ) ) {
@@ -650,8 +812,8 @@ class WP_Clone_Master {
         }
 
         // ── Browser is now disconnected — run the backup ──────────────────
-        @set_time_limit( 0 );
-        @ini_set( 'memory_limit', '512M' );
+        @set_time_limit( 0 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required for large file downloads
+        @ini_set( 'memory_limit', '512M' ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required for large site processing
 
         $this->scheduler->run_backup( 'manual' );
 
@@ -712,7 +874,7 @@ class WP_Clone_Master {
         if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorized' );
 
         WPCM_Backup_Settings::clear_history();
-        wp_send_json_success( [ 'message' => 'Historique effacé.' ] );
+        wp_send_json_success( [ 'message' => 'History cleared.' ] );
     }
 
     // =========================================================================
@@ -732,9 +894,24 @@ class WP_Clone_Master {
         check_ajax_referer( 'wpcm_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorized' );
 
-        $nc_url = esc_url_raw( trim( $_POST['nextcloud_url'] ?? '' ) );
+        // Sanitization order — two rules must both be satisfied simultaneously:
+        //
+        //   MissingUnslash    (WordPress.Security.ValidatedSanitizedInput.MissingUnslash)
+        //   → wp_unslash() must be the innermost wrapper around $_POST directly.
+        //
+        //   InputNotSanitized (WordPress.Security.ValidatedSanitizedInput.InputNotSanitized)
+        //   → esc_url_raw() must receive the result of wp_unslash() as its direct
+        //     argument. Any intermediate call (even trim()) breaks the sniff's
+        //     recognition of the sanitization chain.
+        //
+        // Solution: sanitize first with esc_url_raw( wp_unslash( ... ) ), then trim
+        // the already-sanitized value in a separate statement. This satisfies both
+        // sniffs without a phpcs:ignore and keeps the logic correct — esc_url_raw()
+        // normalises the URL before we strip surrounding whitespace.
+        $nc_url = esc_url_raw( wp_unslash( $_POST['nextcloud_url'] ?? '' ) );
+        $nc_url = trim( $nc_url );
         if ( ! $nc_url ) {
-            wp_send_json_error( [ 'message' => 'URL Nextcloud manquante.' ] );
+            wp_send_json_error( [ 'message' => 'Nextcloud URL is required.' ] );
         }
 
         $nc_url = rtrim( $nc_url, '/' );
@@ -764,7 +941,7 @@ class WP_Clone_Master {
         ] );
 
         if ( is_wp_error( $response ) ) {
-            wp_send_json_error( [ 'message' => 'Impossible de joindre Nextcloud : ' . $response->get_error_message() ] );
+            wp_send_json_error( [ 'message' => 'Unable to reach Nextcloud: ' . $response->get_error_message() ] );
         }
 
         $code = wp_remote_retrieve_response_code( $response );
@@ -772,8 +949,8 @@ class WP_Clone_Master {
 
         if ( $code !== 200 || empty( $body['poll'] ) || empty( $body['login'] ) ) {
             wp_send_json_error( [
-                'message' => 'Réponse inattendue de Nextcloud (HTTP ' . $code . '). '
-                           . 'Vérifiez l\'URL et que votre instance est en NC 16+.',
+                'message' => 'Unexpected response from Nextcloud (HTTP ' . $code . '). '
+                           . 'Check the URL and that your instance is NC 16+.',
             ] );
         }
 
@@ -785,7 +962,7 @@ class WP_Clone_Master {
         $poll_host = wp_parse_url( $body['poll']['endpoint'] ?? '', PHP_URL_HOST );
         if ( ! $poll_host || strtolower( $poll_host ) !== strtolower( $nc_host ) ) {
             wp_send_json_error( [
-                'message' => 'Le poll endpoint retourné par Nextcloud ne correspond pas au domaine déclaré. Connexion annulée.',
+                'message' => 'The poll endpoint returned by Nextcloud does not match the declared domain. Connection cancelled.',
             ] );
         }
         // ─────────────────────────────────────────────────────────────────────
@@ -814,11 +991,11 @@ class WP_Clone_Master {
         check_ajax_referer( 'wpcm_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorized' );
 
-        $session_id = sanitize_text_field( $_POST['session_id'] ?? '' );
+        $session_id = sanitize_text_field( wp_unslash( $_POST['session_id'] ?? '' ) );
         $flow_data  = get_transient( 'wpcm_nc_flow_' . $session_id );
 
         if ( ! $flow_data ) {
-            wp_send_json_error( [ 'message' => 'Session expirée ou invalide.' ] );
+            wp_send_json_error( [ 'message' => 'Session expired or invalid.' ] );
         }
 
         // POST to Nextcloud poll endpoint with the token in the body.
@@ -873,7 +1050,7 @@ class WP_Clone_Master {
 
         // Unexpected response — abort
         delete_transient( 'wpcm_nc_flow_' . $session_id );
-        wp_send_json_error( [ 'message' => 'Réponse inattendue (HTTP ' . $code . ').' ] );
+        wp_send_json_error( [ 'message' => 'Unexpected response (HTTP ' . $code . ').' ] );
     }
 
     /**
@@ -892,7 +1069,7 @@ class WP_Clone_Master {
             'storage_driver'      => 'local',
         ] );
 
-        wp_send_json_success( [ 'message' => 'Compte Nextcloud déconnecté.' ] );
+        wp_send_json_success( [ 'message' => 'Nextcloud account disconnected.' ] );
     }
 
     /**
@@ -904,7 +1081,7 @@ class WP_Clone_Master {
 
         // Build a temporary settings object from POST values (not yet saved)
         // so the user can test before saving.
-        $nc_url_raw = esc_url_raw( $_POST['nextcloud_url'] ?? '' );
+        $nc_url_raw = esc_url_raw( wp_unslash( $_POST['nextcloud_url'] ?? '' ) );
 
         // ── SSRF guard + DNS pinning ──────────────────────────────────────────
         // Same validation as ajax_nc_init_flow(): reject non-http(s) schemes and
@@ -921,11 +1098,11 @@ class WP_Clone_Master {
 
         $settings = new WPCM_Backup_Settings();
         $settings->save( [
-            'storage_driver'  => sanitize_text_field( $_POST['storage_driver']  ?? 'local' ),
+            'storage_driver'  => sanitize_text_field( wp_unslash( $_POST['storage_driver'] ?? 'local' ) ),
             'nextcloud_url'   => $nc_url_raw,
-            'nextcloud_user'  => sanitize_text_field( $_POST['nextcloud_user']  ?? '' ),
-            'nextcloud_pass'  => $_POST['nextcloud_pass']                        ?? '',
-            'nextcloud_path'  => sanitize_text_field( $_POST['nextcloud_path']  ?? 'Backups/WordPress' ),
+            'nextcloud_user'  => sanitize_text_field( wp_unslash( $_POST['nextcloud_user'] ?? '' ) ),
+            'nextcloud_pass'  => wp_unslash( $_POST['nextcloud_pass'] ?? '' ), // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Password: sanitize_text_field corrupts special chars; value stored AES-encrypted,
+            'nextcloud_path'  => sanitize_text_field( wp_unslash( $_POST['nextcloud_path'] ?? 'Backups/WordPress' ) ),
         ] );
 
         $driver = WPCM_Storage_Driver::make( $settings );
@@ -962,12 +1139,12 @@ class WP_Clone_Master {
 
         // Reject non-http(s) schemes outright
         if ( empty( $parsed['scheme'] ) || ! in_array( strtolower( $parsed['scheme'] ), [ 'http', 'https' ], true ) ) {
-            return [ 'error' => 'URL Nextcloud invalide : seuls les protocoles http et https sont acceptés.', 'ip' => null, 'host' => '', 'port' => 443 ];
+            return [ 'error' => 'Invalid Nextcloud URL: only http and https protocols are accepted.', 'ip' => null, 'host' => '', 'port' => 443 ];
         }
 
         $host = $parsed['host'] ?? '';
         if ( ! $host ) {
-            return [ 'error' => 'URL Nextcloud invalide : hôte manquant.', 'ip' => null, 'host' => '', 'port' => 443 ];
+            return [ 'error' => 'Invalid Nextcloud URL: missing host.', 'ip' => null, 'host' => '', 'port' => 443 ];
         }
 
         $default_port = strtolower( $parsed['scheme'] ) === 'https' ? 443 : 80;
@@ -989,7 +1166,7 @@ class WP_Clone_Master {
         // FILTER_FLAG_NO_RES_RANGE covers: 127.x, 0.x, 169.254.x, 192.0.2.x, and more.
         $flags = FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE;
         if ( filter_var( $ip, FILTER_VALIDATE_IP, $flags ) === false ) {
-            return [ 'error' => 'URL Nextcloud refusée : les adresses IP internes ou réservées ne sont pas autorisées.', 'ip' => null, 'host' => $host, 'port' => $port ];
+            return [ 'error' => 'Invalid Nextcloud URL: internal or reserved IP addresses are not allowed.', 'ip' => null, 'host' => $host, 'port' => $port ];
         }
 
         return [ 'error' => null, 'ip' => $ip, 'host' => $host, 'port' => $port ];
@@ -1027,9 +1204,9 @@ class WP_Clone_Master {
             RecursiveIteratorIterator::CHILD_FIRST
         );
         foreach ( $items as $item ) {
-            $item->isDir() ? rmdir( $item->getRealPath() ) : unlink( $item->getRealPath() );
+            $item->isDir() ? rmdir( $item->getRealPath() ) : wp_delete_file( $item->getRealPath() ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- WP_Filesystem cannot do recursive delete in background context
         }
-        rmdir( $dir );
+        rmdir( $dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir
     }
 
     // =========================================================================
@@ -1088,9 +1265,9 @@ class WP_Clone_Master {
         if ( ! current_user_can( 'manage_options' ) ) return;
         $url = admin_url( 'options-reading.php' );
         echo '<div class="notice notice-warning">'
-           . '<p><strong>WP Clone Master</strong> — '
-           . 'Les moteurs de recherche sont <strong>bloqués</strong> suite à la migration. '
-           . '<a href="' . esc_url( $url ) . '">Réglages &gt; Lecture</a> pour activer l\'indexation quand le site est validé.</p>'
+           . '<p><strong>Clone Master</strong> — '
+           . 'Search engines are <strong>blocked</strong> after migration. '
+           . 'Go to <a href="' . esc_url( $url ) . '">Settings &gt; Reading</a> to enable indexing once the site is verified.</p>'
            . '</div>';
     }
 
@@ -1108,6 +1285,6 @@ class WP_Clone_Master {
 }
 
 // Initialize
-WP_Clone_Master::instance();
+WPCM_Plugin::instance();
 
-endif; // class_exists WP_Clone_Master
+endif; // class_exists WPCM_Plugin

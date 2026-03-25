@@ -12,6 +12,52 @@
  * 5. config         → Capture root config files (no wp-config.php), options, meta
  * 6. package        → Bundle everything into final ZIP
  * 7. cleanup        → Remove temp files
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * DEVELOPER NOTE — esc_sql() + remove_placeholder_escape() in SQL dump (step 2)
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * CONTEXT
+ * Since WordPress 4.8.3, esc_sql() replaces every bare '%' character with an
+ * internal sha256-based placeholder token to prevent a class of SQLi attacks via
+ * wpdb::prepare(). WordPress strips that placeholder automatically just before
+ * calling mysqli_query(), so normal in-memory queries are unaffected.
+ *
+ * THE BUG THIS CAUSED
+ * In step_database(), row values are escaped with esc_sql() and then written
+ * directly to .sql files on disk — they never pass through wpdb::query(). As a
+ * result the placeholder was persisted as-is in the dump:
+ *
+ *   DB value         : /%postname%/
+ *   Buggy dump       : '/{b760cf9cc981…}postname{b760cf9cc981…}/'   ← corrupt
+ *   Expected dump    : '/%postname%/'                                 ← correct
+ *
+ * This broke WordPress permalinks on import, and also corrupted CSS stored in
+ * the database (e.g. Elementor / Bricks inline styles with `width:100%`).
+ *
+ * THE FIX
+ * Wrap esc_sql() with $wpdb->remove_placeholder_escape() before writing to file.
+ * This is the official, public WP Core API for this exact scenario, documented at:
+ * https://make.wordpress.org/core/2017/10/31/changed-behaviour-of-esc_sql/
+ *
+ *   return "'" . $wpdb->remove_placeholder_escape( esc_sql( $v ) ) . "'";
+ *
+ * esc_sql() is still needed (and must stay): it handles backslash-escaping of
+ * single quotes, backslashes, and NUL bytes, which are mandatory for a valid SQL
+ * file. remove_placeholder_escape() only undoes the % substitution step — it does
+ * not remove the other escaping.
+ *
+ * WHY NOT THE ALTERNATIVES
+ *   $wpdb->dbh->real_escape_string()  — private wpdb property, rejected by the
+ *                                        WordPress Plugin Review Team (wp.org).
+ *   mysqli_real_escape_string()        — raw mysqli call, bypasses WP abstraction.
+ *   addslashes()                       — explicitly forbidden by WP Coding Standards.
+ *
+ * DO NOT "SIMPLIFY" THIS IN FUTURE
+ * If you are tempted to replace the remove_placeholder_escape( esc_sql( $v ) )
+ * pattern with a bare esc_sql( $v ), the % corruption bug WILL return. The two
+ * calls are not interchangeable when writing to a file instead of a query.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
@@ -27,18 +73,18 @@ class WPCM_Exporter {
             return $this->step_init();
         }
 
-        if ( ! $session_id ) throw new Exception( 'Missing session ID' );
+        if ( ! $session_id ) throw new Exception( __( 'Missing session ID', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
 
         $this->session_id  = $session_id;
         $this->session_dir = WPCM_TEMP_DIR . $session_id . '/';
 
         if ( ! is_dir( $this->session_dir ) ) {
-            throw new Exception( 'Session not found: ' . $session_id );
+            throw new Exception( __( 'Session not found: ', 'clone-master' ) . $session_id ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
         }
 
         $this->manifest = json_decode( file_get_contents( $this->session_dir . 'manifest.json' ), true );
         if ( ! $this->manifest ) {
-            throw new Exception( 'Corrupt manifest file' );
+            throw new Exception( __( 'Corrupt manifest file', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
         }
 
         switch ( $step ) {
@@ -48,7 +94,7 @@ class WPCM_Exporter {
             case 'config':        return $this->step_config();
             case 'package':       return $this->step_package();
             case 'cleanup':       return $this->step_cleanup();
-            default:              throw new Exception( 'Unknown step: ' . $step );
+            default:              throw new Exception( __( 'Unknown step: ', 'clone-master' ) . $step ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
         }
     }
 
@@ -64,7 +110,7 @@ class WPCM_Exporter {
         wp_mkdir_p( $this->session_dir . 'files/' );
         // Protect session subdirectory immediately — the parent wpcm-temp/.htaccess
         // may not propagate to subdirs on hosts with AllowOverride None.
-        WP_Clone_Master::protect_directory( $this->session_dir );
+        WPCM_Plugin::protect_directory( $this->session_dir );
 
         $detector = new WPCM_Server_Detector();
         $server_info = $detector->get_info();
@@ -103,7 +149,7 @@ class WPCM_Exporter {
             'server_info' => $server_info,
             'next_step'   => 'database',
             'progress'    => 5,
-            'message'     => 'Session initialized. Exporting database...',
+            'message'     => __( 'Session initialized. Exporting database...', 'clone-master' ),
         ];
     }
 
@@ -113,13 +159,14 @@ class WPCM_Exporter {
     private function step_database() {
         global $wpdb;
 
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Full export requires live table list; caching would miss recently created tables
         $tables = $wpdb->get_col(
             $wpdb->prepare( "SHOW TABLES LIKE %s", $wpdb->esc_like( $wpdb->prefix ) . '%' )
         );
         $sql_dir = $this->session_dir . 'sql/';
         $table_info = [];
 
-        $header  = "-- WP Clone Master Database Export\n";
+        $header  = "-- Clone Master Database Export\n";
         $header .= "-- Date: " . gmdate( 'Y-m-d H:i:s' ) . " UTC\n";
         $header .= "-- Site: " . site_url() . "\n";
         $header .= "-- Prefix: {$wpdb->prefix}\n";
@@ -127,7 +174,7 @@ class WPCM_Exporter {
         $header .= "SET SQL_MODE = \"NO_AUTO_VALUE_ON_ZERO\";\n";
         $header .= "SET NAMES utf8mb4;\n";
         $header .= "SET FOREIGN_KEY_CHECKS = 0;\n\n";
-        file_put_contents( $sql_dir . '00_header.sql', $header );
+        file_put_contents( $sql_dir . '00_header.sql', $header, LOCK_EX );
 
         foreach ( $tables as $idx => $table ) {
             $filename  = sprintf( '%02d_%s.sql', $idx + 1, $table );
@@ -135,13 +182,14 @@ class WPCM_Exporter {
             $sql       = '';
 
             // Use real table names — prefix replacement happens at import time.
-            $create = $wpdb->get_row( "SHOW CREATE TABLE `{$table}`", ARRAY_N );
+            $safe_table = esc_sql( $table );
+            $create = $wpdb->get_row( "SHOW CREATE TABLE `{$safe_table}`", ARRAY_N ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- table name from SHOW TABLES, escaped via esc_sql()
             if ( $create ) {
                 $sql .= "DROP TABLE IF EXISTS `{$table}`;\n";
                 $sql .= $create[1] . ";\n\n";
             }
 
-            $count  = (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$table}`" );
+            $count  = (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$safe_table}`" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- table name from SHOW TABLES, escaped via esc_sql()
             // Use multi-row INSERTs (100 rows per statement) — like mysqldump default.
             // This reduces query count from N to N/100, dramatically faster on import.
             $batch       = 100;
@@ -149,37 +197,68 @@ class WPCM_Exporter {
             $insert_rows = 100; // rows per INSERT INTO ... VALUES (...),(...),...
 
             while ( $offset < $count ) {
-                $rows = $wpdb->get_results( "SELECT * FROM `{$table}` LIMIT {$offset}, {$batch}", ARRAY_A );
+                $rows = $wpdb->get_results( "SELECT * FROM `{$safe_table}` LIMIT {$offset}, {$batch}", ARRAY_A ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- table name from SHOW TABLES, escaped via esc_sql()
                 if ( ! $rows ) break;
 
                 $cols        = array_map( function( $c ) { return "`{$c}`"; }, array_keys( $rows[0] ) );
                 $cols_str    = implode( ',', $cols );
                 $row_values  = [];
 
-                // Get the raw mysqli connection handle — we need mysqli_real_escape_string()
-                // directly, NOT $wpdb->_real_escape() which since WP 4.8.3 calls
-                // add_placeholder_escape() and replaces % with a SHA256 hash.
-                // That destroys WordPress permalink tokens (%postname%, %event%, etc.)
-                // stored in wp_options. Direct mysqli escaping has no such side-effect.
-                $db_handle = $wpdb->dbh;
-
                 foreach ( $rows as $row ) {
-                    $values = array_map( function( $v ) use ( $db_handle ) {
+                    $values = array_map( function( $v ) use ( $wpdb ) {
                         if ( $v === null ) return 'NULL';
-                        return "'" . mysqli_real_escape_string( $db_handle, $v ) . "'";
+                        /*
+                         * WHY remove_placeholder_escape() IS REQUIRED HERE
+                         * ─────────────────────────────────────────────────
+                         * Since WordPress 4.8.3 (security hardening against SQLi via
+                         * wpdb::prepare), esc_sql() no longer returns a plain escaped
+                         * string. Instead, every bare '%' in the value is silently
+                         * replaced by an internal sha256-based placeholder token:
+                         *
+                         *   esc_sql('/%postname%/') → '/{b760…}postname{b760…}/'
+                         *
+                         * WordPress removes that placeholder automatically right before
+                         * calling mysqli_query() — so for normal in-memory queries the
+                         * round-trip is invisible. But here we are writing the escaped
+                         * value straight to a .sql FILE. The placeholder is therefore
+                         * never restored, and the dump ends up with corrupt data:
+                         *
+                         *   permalinks : /%postname%/  →  /{b760…}postname{b760…}/
+                         *   CSS        : width:100%    →  width:100{b760…}
+                         *   LIKE masks : location_%    →  location_{b760…}
+                         *
+                         * $wpdb->remove_placeholder_escape() is the official, public
+                         * WP Core API for exactly this situation (documented on
+                         * make.wordpress.org/core/2017/10/31/changed-behaviour-of-esc_sql).
+                         * It must wrap esc_sql(), NOT replace it: esc_sql() still
+                         * handles backslash-escaping of quotes, backslashes, and NUL
+                         * bytes, which we need for a valid SQL file.
+                         *
+                         * Alternatives that are NOT wp.org-compatible:
+                         *   - $wpdb->dbh->real_escape_string() — accesses a private
+                         *     wpdb property; rejected by Plugin Review Team.
+                         *   - mysqli_real_escape_string()       — raw mysqli, no WP layer.
+                         *   - addslashes()                      — forbidden by WP coding standards.
+                         *
+                         * phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+                         * -- value is escaped via esc_sql(); placeholder removed before
+                         *    file write, not before a wpdb query. This is the correct
+                         *    pattern for SQL dump generation outside of wpdb::query().
+                         */
+                        return "'" . $wpdb->remove_placeholder_escape( esc_sql( $v ) ) . "'";
                     }, array_values( $row ) );
                     $row_values[] = '(' . implode( ',', $values ) . ')';
 
                     // Flush every $insert_rows rows to keep statement size manageable
                     if ( count( $row_values ) >= $insert_rows ) {
-                        $sql .= "INSERT IGNORE INTO `{$table}` ({$cols_str}) VALUES\n  "
+                        $sql .= "INSERT IGNORE INTO `{$safe_table}` ({$cols_str}) VALUES\n  "
                               . implode( ",\n  ", $row_values ) . ";\n";
                         $row_values = [];
                     }
                 }
                 // Flush remaining rows
                 if ( ! empty( $row_values ) ) {
-                    $sql .= "INSERT IGNORE INTO `{$table}` ({$cols_str}) VALUES\n  "
+                    $sql .= "INSERT IGNORE INTO `{$safe_table}` ({$cols_str}) VALUES\n  "
                           . implode( ",\n  ", $row_values ) . ";\n";
                 }
 
@@ -187,12 +266,12 @@ class WPCM_Exporter {
 
                 // Write to disk every 2MB to avoid memory spikes
                 if ( strlen( $sql ) > 2 * 1024 * 1024 ) {
-                    file_put_contents( $filepath, $sql, FILE_APPEND );
+                    file_put_contents( $filepath, $sql, FILE_APPEND | LOCK_EX );
                     $sql = '';
                 }
             }
 
-            file_put_contents( $filepath, $sql, FILE_APPEND );
+            file_put_contents( $filepath, $sql, FILE_APPEND | LOCK_EX );
 
             $table_info[] = [
                 'name' => $table,
@@ -201,7 +280,7 @@ class WPCM_Exporter {
             ];
         }
 
-        file_put_contents( $sql_dir . '99_footer.sql', "\nSET FOREIGN_KEY_CHECKS = 1;\n" );
+        file_put_contents( $sql_dir . '99_footer.sql', "\nSET FOREIGN_KEY_CHECKS = 1;\n", LOCK_EX );
 
         $this->manifest['tables']       = $table_info;
         $this->manifest['steps_done'][] = 'database';
@@ -212,7 +291,7 @@ class WPCM_Exporter {
             'tables_count' => count( $tables ),
             'next_step'    => 'files_scan',
             'progress'     => 25,
-            'message'      => count( $tables ) . ' tables exported. Scanning files...',
+            'message'      => count( $tables ) . /* translators: %d = number of tables */ ' ' . __( 'tables exported. Scanning files...', 'clone-master' ),
         ];
     }
 
@@ -244,7 +323,7 @@ class WPCM_Exporter {
             if ( $items ) {
                 foreach ( $items as $item ) {
                     if ( $item === '.' || $item === '..' ) continue;
-                    if ( in_array( $item, [ 'wp-clone-master', 'wpcm-backups', 'wpcm-temp', 'wpcm-logs' ], true ) ) continue;
+                    if ( in_array( $item, [ 'clone-master', 'wpcm-backups', 'wpcm-temp', 'wpcm-logs' ], true ) ) continue;
 
                     $path = WP_PLUGIN_DIR . '/' . $item;
                     if ( is_dir( $path ) ) {
@@ -415,7 +494,7 @@ class WPCM_Exporter {
             'queue_total' => count( $queue ),
             'next_step'   => count( $queue ) > 0 ? 'files_archive' : 'config',
             'progress'    => 30,
-            'message'     => count( $queue ) . ' archive jobs planned. Starting file archiving...',
+            'message'     => count( $queue ) . /* translators: %d = number of jobs */ ' ' . __( 'archive jobs planned. Starting file archiving...', 'clone-master' ),
         ];
     }
 
@@ -431,7 +510,7 @@ class WPCM_Exporter {
                 'session_id' => $this->session_id,
                 'next_step'  => 'config',
                 'progress'   => 70,
-                'message'    => 'All files archived. Capturing config...',
+                'message'    => __( 'All files archived. Capturing config...', 'clone-master' ),
             ];
         }
 
@@ -470,7 +549,7 @@ class WPCM_Exporter {
             'progress'    => round( $progress, 1 ),
             'queue_done'  => $done,
             'queue_total' => $total,
-            'message'     => "[{$done}/{$total}] " . $job['label'] . $size_str . ( $has_more ? '' : ' — All files archived.' ),
+            'message'     => "[{$done}/{$total}] " . $job['label'] . $size_str . ( $has_more ? '' : ' — ' . __( 'All files archived.', 'clone-master' ) ),
         ];
     }
 
@@ -478,64 +557,6 @@ class WPCM_Exporter {
     // Step 5: Capture configuration
     // =========================================================================
     private function step_config() {
-        $config = [];
-        $config['DB_HOST']      = '{{DB_HOST}}';
-        $config['DB_NAME']      = '{{DB_NAME}}';
-        $config['DB_USER']      = '{{DB_USER}}';
-        $config['DB_PASSWORD']  = '{{DB_PASSWORD}}';
-        $config['DB_CHARSET']   = defined( 'DB_CHARSET' ) ? DB_CHARSET : 'utf8mb4';
-        $config['DB_COLLATE']   = defined( 'DB_COLLATE' ) ? DB_COLLATE : '';
-        $config['table_prefix'] = $GLOBALS['wpdb']->prefix;
-
-        $constants = [
-            'WP_DEBUG', 'WP_DEBUG_LOG', 'WP_DEBUG_DISPLAY',
-            'DISALLOW_FILE_EDIT', 'DISALLOW_FILE_MODS',
-            'WP_AUTO_UPDATE_CORE', 'WP_MEMORY_LIMIT',
-            'WP_MAX_MEMORY_LIMIT', 'EMPTY_TRASH_DAYS',
-            'WP_POST_REVISIONS', 'AUTOSAVE_INTERVAL',
-            'WP_CACHE', 'COMPRESS_CSS', 'COMPRESS_SCRIPTS',
-            'CONCATENATE_SCRIPTS', 'ENFORCE_GZIP',
-            'MULTISITE', 'WP_ALLOW_MULTISITE',
-        ];
-        foreach ( $constants as $const ) {
-            if ( defined( $const ) ) {
-                $config[ $const ] = constant( $const );
-            }
-        }
-        file_put_contents( $this->session_dir . 'config.json', wp_json_encode( $config, JSON_PRETTY_PRINT ) );
-
-        $plugins_data = [];
-        foreach ( get_plugins() as $file => $data ) {
-            $plugins_data[ $file ] = [
-                'name'    => $data['Name'],
-                'version' => $data['Version'],
-                'active'  => is_plugin_active( $file ),
-            ];
-        }
-        file_put_contents( $this->session_dir . 'plugins.json', wp_json_encode( $plugins_data, JSON_PRETTY_PRINT ) );
-
-        $themes_data = [];
-        foreach ( wp_get_themes() as $slug => $theme ) {
-            $themes_data[ $slug ] = [
-                'name'    => $theme->get( 'Name' ),
-                'version' => $theme->get( 'Version' ),
-                'parent'  => $theme->parent() ? $theme->parent()->get_stylesheet() : null,
-            ];
-        }
-        file_put_contents( $this->session_dir . 'themes.json', wp_json_encode( $themes_data, JSON_PRETTY_PRINT ) );
-
-        $key_options = [
-            'siteurl', 'home', 'blogname', 'blogdescription',
-            'permalink_structure', 'default_role', 'timezone_string',
-            'gmt_offset', 'date_format', 'time_format',
-            'WPLANG', 'stylesheet', 'template',
-        ];
-        $options = [];
-        foreach ( $key_options as $opt ) {
-            $options[ $opt ] = get_option( $opt );
-        }
-        file_put_contents( $this->session_dir . 'options.json', wp_json_encode( $options, JSON_PRETTY_PRINT ) );
-
         // Root files
         $root_files = [];
         // wp-config.php is intentionally excluded — it contains sensitive credentials
@@ -556,7 +577,7 @@ class WPCM_Exporter {
             'session_id' => $this->session_id,
             'next_step'  => 'package',
             'progress'   => 75,
-            'message'    => 'Configuration captured. Creating final package...',
+            'message'    => __( 'Configuration captured. Creating final package...', 'clone-master' ),
         ];
     }
 
@@ -568,7 +589,7 @@ class WPCM_Exporter {
         $this->manifest['completed_at'] = gmdate( 'Y-m-d H:i:s' ) . ' UTC';
         $this->save_manifest();
 
-        $site_name = sanitize_title( parse_url( site_url(), PHP_URL_HOST ) );
+        $site_name = sanitize_title( wp_parse_url( site_url(), PHP_URL_HOST ) );
         $filename  = 'wpcm_' . $site_name . '_' . gmdate( 'Ymd_His' ) . '.zip';
         $zip_path  = WPCM_BACKUP_DIR . $filename;
 
@@ -576,14 +597,14 @@ class WPCM_Exporter {
 
         $zip = new ZipArchive();
         if ( $zip->open( $zip_path, ZipArchive::CREATE | ZipArchive::OVERWRITE ) !== true ) {
-            throw new Exception( 'Cannot create ZIP archive at: ' . $zip_path );
+            throw new Exception( __( 'Cannot create ZIP archive at: ', 'clone-master' ) . $zip_path ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
         }
 
         $this->add_dir_to_zip( $zip, $this->session_dir, '' );
         $zip->close();
 
         if ( ! file_exists( $zip_path ) ) {
-            throw new Exception( 'ZIP file was not created' );
+            throw new Exception( __( 'ZIP file was not created', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
         }
 
         return [
@@ -592,7 +613,8 @@ class WPCM_Exporter {
             'progress'     => 95,
             'filename'     => $filename,
             'size'         => size_format( filesize( $zip_path ) ),
-            'path'         => $zip_path,
+            // 'path' intentionally omitted — absolute server path not needed by the
+            // frontend and leaks directory layout. Use 'filename' for all operations.
             'download_url' => admin_url( 'admin-ajax.php?action=wpcm_download_backup&backup_name=' . urlencode( $filename ) . '&nonce=' . wp_create_nonce( 'wpcm_nonce' ) ),
             'message'      => 'Package created: ' . $filename . ' (' . size_format( filesize( $zip_path ) ) . ')',
         ];
@@ -608,7 +630,7 @@ class WPCM_Exporter {
             'session_id' => $this->session_id,
             'next_step'  => null,
             'progress'   => 100,
-            'message'    => 'Export complete! Temporary files cleaned up.',
+            'message'    => __( 'Export complete! Temporary files cleaned up.', 'clone-master' ),
         ];
     }
 
@@ -619,7 +641,7 @@ class WPCM_Exporter {
     private function create_zip_from_dir( $source_dir, $zip_path, $prefix ) {
         $zip = new ZipArchive();
         if ( $zip->open( $zip_path, ZipArchive::CREATE | ZipArchive::OVERWRITE ) !== true ) {
-            throw new Exception( "Cannot create ZIP: {$zip_path}" );
+            throw new Exception( __( 'Cannot create ZIP: ', 'clone-master' ) . $zip_path ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
         }
 
         $count = 0;
@@ -630,7 +652,7 @@ class WPCM_Exporter {
         // never kill legitimate plugin subdirectories.
         $exclude_basenames = [
             'node_modules', '.git', '.svn',
-            'wp-clone-master', 'wpcm-backups', 'wpcm-temp', 'wpcm-logs',
+            'clone-master', 'wpcm-backups', 'wpcm-temp', 'wpcm-logs',
         ];
         // These are excluded only when they are the DIRECT child of wp-content or uploads
         // (i.e., root-level cache directories, not plugin internals named cache)
@@ -700,7 +722,7 @@ class WPCM_Exporter {
 
         $zip = new ZipArchive();
         if ( $zip->open( $zip_path, ZipArchive::CREATE | ZipArchive::OVERWRITE ) !== true ) {
-            throw new Exception( "Cannot create ZIP: {$zip_path}" );
+            throw new Exception( __( 'Cannot create ZIP: ', 'clone-master' ) . $zip_path ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
         }
 
         $count = 0;
@@ -758,8 +780,8 @@ class WPCM_Exporter {
             RecursiveIteratorIterator::CHILD_FIRST
         );
         foreach ( $items as $item ) {
-            $item->isDir() ? rmdir( $item->getRealPath() ) : unlink( $item->getRealPath() );
+            $item->isDir() ? rmdir( $item->getRealPath() ) : wp_delete_file( $item->getRealPath() ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- WP_Filesystem::rmdir() requires auth credentials, unsuitable for background processing
         }
-        rmdir( $dir );
+        rmdir( $dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- WP_Filesystem::rmdir() requires auth credentials, unsuitable for background processing
     }
 }

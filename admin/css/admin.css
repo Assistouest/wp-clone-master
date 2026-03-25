@@ -1,5 +1,5 @@
 /* =============================================================================
-   WP Clone Master — Interface d'administration · Thème clair professionnel
+   Clone Master — Interface d'administration · Thème clair professionnel
    ============================================================================= */
 
 #wpcm-admin-root {
@@ -250,6 +250,8 @@ select.wpcm-input { background-image:url("data:image/svg+xml,%3csvg xmlns='http:
 .wpcm-badge-ok   { background:var(--c-green-dim); color:var(--c-green); border:1px solid var(--c-green-border); }
 .wpcm-badge-warn { background:var(--c-orange-dim); color:var(--c-orange); border:1px solid var(--c-orange-border); }
 .wpcm-badge-bad  { background:var(--c-red-dim); color:var(--c-red); border:1px solid var(--c-red-border); }
+.wpcm-badge-local { background:#f0f2f7; color:#4b5471; border:1px solid #c8cedf; }
+.wpcm-badge-nc    { background:#eef2ff; color:#2c5ff6; border:1px solid #c7d4fc; }
 
 /* TABLEAU */
 .wpcm-table-wrap { overflow-x:auto; margin:0 -2px; }
@@ -282,4 +284,32 @@ select.wpcm-input { background-image:url("data:image/svg+xml,%3csvg xmlns='http:
     .wpcm-stats-grid { grid-template-columns:repeat(2,1fr); }
     .wpcm-manifest-grid { grid-template-columns:1fr 1fr; }
     .wpcm-header p { display:none; }
+}
+
+/* BOUTON CAFÉ FIXE */
+#wpcm-coffee-root { position:fixed; bottom:24px; right:24px; z-index:99999; }
+.wpcm-coffee-btn {
+    display:inline-flex; align-items:center; gap:8px;
+    padding:10px 18px;
+    background:#FFDD00; color:#1a1a1a;
+    border-radius:50px;
+    font-size:13px; font-weight:700; line-height:1;
+    text-decoration:none;
+    box-shadow:0 4px 16px rgba(0,0,0,.18);
+    transition:transform .15s ease, box-shadow .15s ease, background .15s ease;
+    white-space:nowrap;
+}
+.wpcm-coffee-btn:hover {
+    background:#FFE833;
+    transform:translateY(-2px);
+    box-shadow:0 6px 22px rgba(0,0,0,.22);
+    color:#1a1a1a;
+    text-decoration:none;
+}
+.wpcm-coffee-btn:active { transform:translateY(0); }
+.wpcm-coffee-label { display:inline; }
+@media (max-width:480px) {
+    #wpcm-coffee-root { bottom:16px; right:16px; }
+    .wpcm-coffee-label { display:none; }
+    .wpcm-coffee-btn { padding:11px; }
 }

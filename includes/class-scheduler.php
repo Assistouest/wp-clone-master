@@ -43,13 +43,13 @@ class WPCM_Scheduler {
         if ( ! isset( $schedules['weekly'] ) ) {
             $schedules['weekly'] = [
                 'interval' => WEEK_IN_SECONDS,
-                'display'  => __( 'Once Weekly', 'wp-clone-master' ),
+                'display'  => __( 'Once Weekly', 'clone-master' ),
             ];
         }
         if ( ! isset( $schedules['monthly'] ) ) {
             $schedules['monthly'] = [
                 'interval' => 30 * DAY_IN_SECONDS,
-                'display'  => __( 'Once Monthly', 'wp-clone-master' ),
+                'display'  => __( 'Once Monthly', 'clone-master' ),
             ];
         }
         return $schedules;
@@ -118,17 +118,17 @@ class WPCM_Scheduler {
         if ( get_transient( self::LOCK_KEY ) ) {
             return [
                 'status'  => 'skipped',
-                'message' => 'A backup is already running. Try again later.',
+                'message' => __( 'A backup is already running. Try again later.', 'clone-master' ),
             ];
         }
         set_transient( self::LOCK_KEY, 1, self::LOCK_TTL );
 
         // ── Increase resource limits ─────────────────────────────────────────
-        @set_time_limit( 0 );
-        @ini_set( 'memory_limit', '512M' );
+        @set_time_limit( 0 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged
+        @ini_set( 'memory_limit', '512M' ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required for large site backup processing
 
-        $run_id     = date( 'Ymd_His' );
-        $started_at = date( 'Y-m-d H:i:s' );
+        $run_id     = gmdate( 'Ymd_His' );
+        $started_at = gmdate( 'Y-m-d H:i:s' );
         $start_ts   = microtime( true );
 
         $entry = [
@@ -162,13 +162,20 @@ class WPCM_Scheduler {
             $exporter->run_step( 'cleanup', $session_id );
 
             // ── Rename with 'auto_' prefix so retention can identify it ──────
-            $original_path = $package['path'];
-            $original_name = basename( $original_path );
+            // Note: step_package() omits 'path' from its return array (the absolute
+            // server path is not exposed to the frontend). In the scheduler context
+            // (server-side cron/manual run) we reconstruct it from 'filename' +
+            // WPCM_BACKUP_DIR, which is always the canonical backup location.
+            $original_name = $package['filename'];
+            $original_path = WPCM_BACKUP_DIR . $original_name;
 
             if ( $trigger === 'auto' && strpos( $original_name, 'auto_' ) !== 0 ) {
                 $auto_name = 'auto_' . $original_name;
                 $auto_path = WPCM_BACKUP_DIR . $auto_name;
-                if ( rename( $original_path, $auto_path ) ) {
+                require_once ABSPATH . 'wp-admin/includes/file.php';
+                WP_Filesystem();
+                global $wp_filesystem;
+                if ( $wp_filesystem && $wp_filesystem->move( $original_path, $auto_path ) ) {
                     $original_path = $auto_path;
                     $original_name = $auto_name;
                 }
@@ -179,7 +186,7 @@ class WPCM_Scheduler {
             $entry['status']       = 'success';
             $entry['filename']     = $original_name;
             $entry['size_bytes']   = $size_bytes;
-            $entry['finished_at']  = date( 'Y-m-d H:i:s' );
+            $entry['finished_at']  = gmdate( 'Y-m-d H:i:s' );
             $entry['duration_sec'] = (int) ( microtime( true ) - $start_ts );
 
             // ── Storage driver upload ─────────────────────────────────────────
@@ -214,7 +221,7 @@ class WPCM_Scheduler {
         } catch ( \Throwable $e ) {
             $entry['status']       = 'error';
             $entry['error']        = $e->getMessage();
-            $entry['finished_at']  = date( 'Y-m-d H:i:s' );
+            $entry['finished_at']  = gmdate( 'Y-m-d H:i:s' );
             $entry['duration_sec'] = (int) ( microtime( true ) - $start_ts );
 
             $this->send_notification( $entry );
@@ -269,7 +276,7 @@ class WPCM_Scheduler {
             $real = realpath( $file );
             // Security: ensure the file is strictly inside the backup dir
             if ( $real && strpos( $real, $real_base ) === 0 ) {
-                @unlink( $file );
+                @wp_delete_file( $file );
             }
         }
     }
@@ -291,19 +298,17 @@ class WPCM_Scheduler {
 
         $to      = $this->settings->notify_email ?: get_option( 'admin_email' );
         $site    = get_bloginfo( 'name' );
-        $trigger = $entry['trigger'] === 'auto' ? 'automatique' : 'manuelle';
+        $trigger = $entry['trigger'] === 'auto' ? __( 'automatic', 'clone-master' ) : __( 'manual', 'clone-master' );
 
         if ( $entry['status'] === 'success' ) {
-            $subject = sprintf( '[%s] Sauvegarde %s réussie', $site, $trigger );
+            $subject = sprintf(
+				/* translators: 1: site name, 2: backup type (automatic/manual) */
+				__( '[%1$s] %2$s backup successful', 'clone-master' ),
+				$site, $trigger
+			);
             $body    = sprintf(
-                "Bonne nouvelle !\n\nLa sauvegarde %s de \"%s\" s'est terminée avec succès.\n\n" .
-                "  Fichier   : %s\n" .
-                "  Taille    : %s\n" .
-                "  Durée     : %d secondes\n" .
-                "  Démarrée  : %s\n" .
-                "  Terminée  : %s\n\n" .
-                "Vous pouvez télécharger ou gérer vos sauvegardes depuis l'interface WordPress.\n\n" .
-                "— WP Clone Master",
+                /* translators: 1: backup type, 2: site name, 3: filename, 4: file size, 5: duration in seconds, 6: start datetime, 7: end datetime */
+				__( "Good news!\n\nThe %1\$s backup of \"%2\$s\" completed successfully.\n\n  File      : %3\$s\n  Size      : %4\$s\n  Duration  : %5\$d seconds\n  Started   : %6\$s\n  Finished  : %7\$s\n\nYou can download or manage your backups from the WordPress dashboard.\n\n— Clone Master", 'clone-master' ),
                 $trigger,
                 $site,
                 $entry['filename'],
@@ -313,17 +318,17 @@ class WPCM_Scheduler {
                 $entry['finished_at']
             );
         } else {
-            $subject = sprintf( '[%s] ÉCHEC sauvegarde %s', $site, $trigger );
+            $subject = sprintf(
+				/* translators: 1: site name, 2: backup type (automatic/manual) */
+				__( '[%1$s] %2$s backup FAILED', 'clone-master' ),
+				$site, $trigger
+			);
             $body    = sprintf(
-                "La sauvegarde %s de \"%s\" a échoué.\n\n" .
-                "  Erreur    : %s\n" .
-                "  Démarrée  : %s\n" .
-                "  Terminée  : %s\n\n" .
-                "Vérifiez les journaux WP-Cron et les droits d'écriture sur le répertoire de sauvegardes.\n\n" .
-                "— WP Clone Master",
+                /* translators: 1: backup type, 2: site name, 3: error message, 4: start datetime, 5: end datetime */
+				__( "The %1\$s backup of \"%2\$s\" failed.\n\n  Error     : %3\$s\n  Started   : %4\$s\n  Finished  : %5\$s\n\nCheck your WP-Cron logs and write permissions on the backup directory.\n\n— Clone Master", 'clone-master' ),
                 $trigger,
                 $site,
-                $entry['error'] ?? 'Erreur inconnue',
+                $entry['error'] ?? __( 'Unknown error', 'clone-master' ),
                 $entry['started_at'],
                 $entry['finished_at']
             );

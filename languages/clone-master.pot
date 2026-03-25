@@ -1,0 +1,262 @@
+# Copyright (C) 2026 Clone Master
+# This file is distributed under the same license as the Clone Master plugin.
+msgid ""
+msgstr ""
+"Project-Id-Version: Clone Master 1.0.0\n"
+"Report-Msgid-Bugs-To: https://github.com/Assistouest/clone-master/issues\n"
+"POT-Creation-Date: 2026-03-23T21:18:40+00:00\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
+"X-Generator: Clone Master\n"
+"X-Domain: clone-master\n"
+
+#: clone-master.php:212
+msgid "Clone Master"
+msgstr ""
+
+#: clone-master.php:266
+msgid "Exporting..."
+msgstr ""
+
+#: clone-master.php:267
+msgid "Importing..."
+msgstr ""
+
+#: clone-master.php:268
+msgid "Operation completed successfully!"
+msgstr ""
+
+#: clone-master.php:269
+msgid "An error occurred."
+msgstr ""
+
+#: clone-master.php:270
+msgid "Support open-source"
+msgstr ""
+
+#: includes/class-exporter.php:76
+msgid "Missing session ID"
+msgstr ""
+
+#: includes/class-exporter.php:82
+msgid "Session not found: "
+msgstr ""
+
+#: includes/class-exporter.php:87
+msgid "Corrupt manifest file"
+msgstr ""
+
+#: includes/class-exporter.php:97
+msgid "Unknown step: "
+msgstr ""
+
+#: includes/class-exporter.php:152
+msgid "Session initialized. Exporting database..."
+msgstr ""
+
+#: includes/class-exporter.php:294
+msgid "tables exported. Scanning files..."
+msgstr ""
+
+#: includes/class-exporter.php:497
+msgid "archive jobs planned. Starting file archiving..."
+msgstr ""
+
+#: includes/class-exporter.php:513
+msgid "All files archived. Capturing config..."
+msgstr ""
+
+#: includes/class-exporter.php:552
+msgid "All files archived."
+msgstr ""
+
+#: includes/class-exporter.php:638
+msgid "Configuration captured. Creating final package..."
+msgstr ""
+
+#: includes/class-exporter.php:658
+msgid "Cannot create ZIP archive at: "
+msgstr ""
+
+#: includes/class-exporter.php:665
+msgid "ZIP file was not created"
+msgstr ""
+
+#: includes/class-exporter.php:691
+msgid "Export complete! Temporary files cleaned up."
+msgstr ""
+
+#: includes/class-exporter.php:702
+msgid "Cannot create ZIP: "
+msgstr ""
+
+#: includes/class-importer.php:41
+msgid "Archive file not found"
+msgstr ""
+
+#: includes/class-importer.php:53
+msgid "Cannot open ZIP archive"
+msgstr ""
+
+#: includes/class-importer.php:63
+msgid "Cannot resolve session directory path."
+msgstr ""
+
+#: includes/class-importer.php:90
+msgid "Invalid archive: path traversal detected in entry \"%1$s\"."
+msgstr ""
+
+#: includes/class-importer.php:104
+msgid "Invalid archive: manifest.json not found"
+msgstr ""
+
+#: includes/class-importer.php:131
+msgid "Session not found"
+msgstr ""
+
+#: includes/class-importer.php:170
+msgid "Missing or invalid installer token (expected 64-char hex string)."
+msgstr ""
+
+#: includes/class-importer.php:177
+msgid "bcrypt hashing failed — check PHP bcrypt support."
+msgstr ""
+
+#: includes/class-importer.php:274
+msgid "Failed to create installer at: "
+msgstr ""
+
+#: includes/class-scheduler.php:46
+msgid "Once Weekly"
+msgstr ""
+
+#: includes/class-scheduler.php:52
+msgid "Once Monthly"
+msgstr ""
+
+#: includes/class-scheduler.php:121
+msgid "A backup is already running. Try again later."
+msgstr ""
+
+#: includes/class-scheduler.php:297
+msgid "automatic"
+msgstr ""
+
+#: includes/class-scheduler.php:297
+msgid "manual"
+msgstr ""
+
+#: includes/class-scheduler.php:302
+msgid "[%1$s] %2$s backup successful"
+msgstr ""
+
+#: includes/class-scheduler.php:307
+msgid "Good news!\\n\\nThe %1\\$s backup of \"%2\\$s\" completed successfully.\\n\\n  File      : %3\\$s\\n  Size      : %4\\$s\\n  Duration  : %5\\$d seconds\\n  Started   : %6\\$s\\n  Finished  : %7\\$s\\n\\nYou can download or manage your backups from the WordPress dashboard.\\n\\n— Clone Master"
+msgstr ""
+
+#: includes/class-scheduler.php:319
+msgid "[%1$s] %2$s backup FAILED"
+msgstr ""
+
+#: includes/class-scheduler.php:324
+msgid "The %1\\$s backup of \"%2\\$s\" failed.\\n\\n  Error     : %3\\$s\\n  Started   : %4\\$s\\n  Finished  : %5\\$s\\n\\nCheck your WP-Cron logs and write permissions on the backup directory.\\n\\n— Clone Master"
+msgstr ""
+
+#: includes/class-scheduler.php:327
+msgid "Unknown error"
+msgstr ""
+
+#: includes/class-storage-driver.php:78
+msgid "Local storage"
+msgstr ""
+
+#: includes/class-storage-driver.php:89
+msgid "File stored locally."
+msgstr ""
+
+#: includes/class-storage-driver.php:89
+msgid "File not found: "
+msgstr ""
+
+#: includes/class-storage-driver.php:104
+msgid "Backup directory is writable."
+msgstr ""
+
+#: includes/class-storage-driver.php:107
+msgid "Directory %1$s is not writable."
+msgstr ""
+
+#: includes/class-storage-driver.php:129
+msgid "Nextcloud"
+msgstr ""
+
+#: includes/class-storage-driver.php:185
+msgid "Local file not found."
+msgstr ""
+
+#: includes/class-storage-driver.php:212
+msgid "File uploaded to Nextcloud (%1$s, %2$s)."
+msgstr ""
+
+#: includes/class-storage-driver.php:242
+msgid "Nextcloud URL is missing."
+msgstr ""
+
+#: includes/class-storage-driver.php:245
+msgid "Username is missing."
+msgstr ""
+
+#: includes/class-storage-driver.php:248
+msgid "Password / token is missing."
+msgstr ""
+
+#: includes/class-storage-driver.php:264
+msgid "Network error: "
+msgstr ""
+
+#: includes/class-storage-driver.php:270
+msgid "Nextcloud connection successful. Folder is accessible."
+msgstr ""
+
+#: includes/class-storage-driver.php:273
+msgid "Authentication refused — check your application token."
+msgstr ""
+
+#: includes/class-storage-driver.php:278
+msgid "Connection successful. Folder created on Nextcloud."
+msgstr ""
+
+#: includes/class-storage-driver.php:279
+msgid "Remote folder not found and could not be created (HTTP 404)."
+msgstr ""
+
+#: includes/class-storage-driver.php:284
+msgid "Unexpected response from Nextcloud server (HTTP %1$s)."
+msgstr ""
+
+#: includes/class-storage-driver.php:309
+msgid "Cannot open local file."
+msgstr ""
+
+#: includes/class-storage-driver.php:337
+msgid "Upload successful."
+msgstr ""
+
+#: includes/class-storage-driver.php:339
+msgid "HTTP %1$s on PUT request."
+msgstr ""
+
+#: includes/class-storage-driver.php:362
+msgid "The PHP cURL extension is required for large file uploads."
+msgstr ""
+
+#: includes/class-storage-driver.php:381
+msgid "Cannot create upload session (HTTP %1$s)."
+msgstr ""
+

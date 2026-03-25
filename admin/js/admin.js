@@ -2,6 +2,7 @@
     'use strict';
 
     const { createElement: h, useState, useEffect, useRef, useCallback, Fragment } = wp.element;
+    const { __ } = wp.i18n;
 
     /* =========================================================
        Helpers API
@@ -25,28 +26,28 @@
                 if (!ct.includes('json')) {
                     return r.text().then(txt => {
                         try { return JSON.parse(txt); } catch {
-                            let m = 'Le serveur a retourné une réponse inattendue. ';
-                            if (txt.includes('Fatal error')) m += 'Erreur PHP fatale détectée. ';
-                            if (txt.includes('Maximum execution time')) m += 'Délai PHP dépassé. ';
-                            if (txt.includes('Allowed memory size')) m += 'Mémoire PHP insuffisante. ';
+                            let m = 'The server returned an unexpected response. ';
+                            if (txt.includes('Fatal error')) m += 'Fatal PHP error detected. ';
+                            if (txt.includes('Maximum execution time')) m += 'PHP execution time exceeded. ';
+                            if (txt.includes('Allowed memory size')) m += 'Insufficient PHP memory. ';
                             throw new Error(m);
                         }
                     });
                 }
                 return r.json();
             })
-            .then(r => { if (!r.success) throw new Error(r.data?.message || r.data || 'Erreur inconnue'); return r.data; })
-            .catch(err => { clearTimeout(timer); if (err.name === 'AbortError') throw new Error('Délai dépassé — le serveur est peut-être encore en cours de traitement.'); throw err; });
+            .then(r => { if (!r.success) throw new Error(r.data?.message || r.data || __( 'Unknown error', 'clone-master' )); return r.data; })
+            .catch(err => { clearTimeout(timer); if (err.name === 'AbortError') throw new Error('Timeout — the server may still be processing.'); throw err; });
     }
 
     async function apiRetry(action, data, retries = MAX_RETRIES, log = null) {
         for (let i = 0; i <= retries; i++) {
             try { return await api(action, data); }
             catch (err) {
-                const retry = err.message.includes('Délai') || err.message.includes('fetch') || err.message.includes('500') || err.message.includes('Network');
+                const retry = err.message.includes('Timeout') || err.message.includes('fetch') || err.message.includes('500') || err.message.includes('Network');
                 if (i < retries && retry) {
                     const w = (i + 1) * 3;
-                    if (log) log(`⚠ ${err.message} — Nouvelle tentative dans ${w}s…`, 'warn');
+                    if (log) log(`⚠ ${err.message} — Retrying in ${w}s…`, 'warn');
                     await new Promise(r => setTimeout(r, w * 1000));
                     continue;
                 }
@@ -60,25 +61,25 @@
         const text = await resp.text();
         // WordPress retourne "-1" quand check_ajax_referer échoue (nonce invalide / session expirée)
         if (text === '-1' || text === '0') {
-            throw new Error('Vérification de sécurité échouée (session expirée ?). Rechargez la page et réessayez.');
+            throw new Error('Security check failed (session expired?). Reload the page and try again.');
         }
         let json;
         try { json = JSON.parse(text); } catch {
-            let msg = 'Réponse non-JSON du serveur (HTTP ' + resp.status + '). ';
-            if (text.includes('Fatal error') || text.includes('Parse error')) msg += 'Erreur PHP fatale. ';
-            if (text.includes('Maximum execution time')) msg += 'Délai PHP dépassé. ';
-            if (text.includes('Allowed memory size')) msg += 'Mémoire insuffisante. ';
-            if (resp.status === 413) msg += 'Fichier trop volumineux (413 Request Entity Too Large). ';
-            if (!text.trim()) msg += 'Réponse vide. ';
-            else msg += 'Extrait : ' + text.substring(0, 120).replace(/<[^>]+>/g, '').trim();
+            let msg = 'Non-JSON response from server (HTTP ' + resp.status + '). ';
+            if (text.includes('Fatal error') || text.includes('Parse error')) msg += __( 'Fatal PHP error detected. ', 'clone-master' );
+            if (text.includes('Maximum execution time')) msg += 'PHP execution time exceeded. ';
+            if (text.includes('Allowed memory size')) msg += 'Insufficient memory. ';
+            if (resp.status === 413) msg += 'File too large (413 Request Entity Too Large). ';
+            if (!text.trim()) msg += 'Empty response. ';
+            else msg += 'Extract: ' + text.substring(0, 120).replace(/<[^>]+>/g, '').trim();
             throw new Error(msg);
         }
         if (!json || typeof json !== 'object') {
-            throw new Error('Réponse inattendue : ' + String(json).substring(0, 100));
+            throw new Error('Unexpected response: ' + String(json).substring(0, 100));
         }
         if (!json.success) {
             const d = json.data;
-            const msg = (d && typeof d === 'object' ? d.message : d) || 'Erreur serveur sans détail';
+            const msg = (d && typeof d === 'object' ? d.message : d) || __( 'Server error without detail', 'clone-master' );
             throw new Error(String(msg));
         }
         return json.data;
@@ -106,6 +107,7 @@
             settings: ['circle|cx=12|cy=12|r=3', 'path|d=M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z'],
             info:     ['circle|cx=12|cy=12|r=10', 'line|x1=12|y1=8|x2=12|y2=12', 'line|x1=12|y1=16|x2=12.01|y2=16'],
             restore:  ['polyline|points=1 4 1 10 7 10', 'path|d=M3.51 15a9 9 0 102.13-9.36L1 10'],
+            coffee:   ['path|d=M18 8h1a4 4 0 010 8h-1', 'path|d=M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z', 'line|x1=6|y1=1|x2=6|y2=4', 'line|x1=10|y1=1|x2=10|y2=4', 'line|x1=14|y1=1|x2=14|y2=4'],
         };
         const elems = (paths[n] || []).map((spec, i) => {
             const parts = spec.split('|');
@@ -142,9 +144,9 @@
         if (!entries || entries.length === 0) return null;
         return h('div', { className: 'wpcm-card' },
             h('div', { className: 'wpcm-log-card-title' },
-                h('span', { className: 'wpcm-log-card-label' }, h(Ico, { n: 'db', s: 15 }), 'Journal d\'activité'),
+                h('span', { className: 'wpcm-log-card-label' }, h(Ico, { n: 'db', s: 15 }), __( 'Activity log', 'clone-master' )),
                 h('button', { className: 'wpcm-log-toggle', onClick: () => setCollapsed(c => !c) },
-                    collapsed ? 'Afficher' : 'Réduire'
+                    collapsed ? __( 'Show', 'clone-master' ) : __( 'Collapse', 'clone-master' )
                 )
             ),
             !collapsed && h('div', { className: 'wpcm-log', ref },
@@ -180,12 +182,12 @@
                     const d = await apiRetry('wpcm_export', { step: next, session_id: sid }, MAX_RETRIES, log);
                     sid = d.session_id || sid;
                     setProgress(d.progress || 0); setMessage(d.message || '');
-                    log(d.message || next + ' terminé', 'success');
+                    log(d.message || next + ' done', 'success');
                     if (d.download_url) setResult(d);
                     next = d.next_step || null;
                 }
-                setDone(true); log('Sauvegarde créée avec succès.', 'success');
-            } catch (e) { setError(e.message); log('Erreur : ' + e.message, 'error'); }
+                setDone(true); log(__( 'Backup created successfully.', 'clone-master' ), 'success');
+            } catch (e) { setError(e.message); log( __( 'Error: ', 'clone-master' ) + e.message, 'error'); }
             finally { setRunning(false); }
         };
 
@@ -193,35 +195,35 @@
             h('div', { className: 'wpcm-intro' },
                 h('div', { className: 'wpcm-intro-ico' }, h(Ico, { n: 'export', s: 18 })),
                 h('div', null,
-                    h('h4', null, 'Sauvegarde complète de votre site'),
-                    h('p', null, 'Votre base de données, vos thèmes, extensions, médias et fichiers de configuration sont archivés de façon sécurisée. Vous pouvez ensuite les restaurer sur n\'importe quel hébergement.')
+                    h('h4', null, __( 'Complete backup of your site', 'clone-master' )),
+                    h('p', null, __( 'Your database, themes, plugins, media and configuration files are securely archived. You can then restore them on any host.', 'clone-master' ))
                 )
             ),
             h('div', { className: 'wpcm-card' },
-                h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'export' }), 'Exporter votre site'),
-                h('p', { className: 'wpcm-card-desc' }, 'Crée une archive complète de votre installation WordPress, prête à migrer ou à conserver en toute sécurité.'),
+                h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'export' }), __( 'Export your site', 'clone-master' )),
+                h('p', { className: 'wpcm-card-desc' }, __( 'Creates a complete archive of your WordPress installation, ready to migrate or store safely.', 'clone-master' )),
 
                 !running && !done && h('button', { className: 'wpcm-btn wpcm-btn-primary wpcm-btn-lg', onClick: run },
-                    h(Ico, { n: 'export', s: 16 }), 'Lancer la sauvegarde'
+                    h(Ico, { n: 'export', s: 16 }), __( 'Start full export', 'clone-master' )
                 ),
 
                 running && h(Fragment, null,
                     h(ProgressBar, { progress, message }),
                     h('div', { className: 'wpcm-running-row' },
                         h('span', { className: 'wpcm-spinner' }),
-                        'Traitement en cours, veuillez patienter…'
+                        __( 'Processing, please wait…', 'clone-master' )
                     )
                 ),
 
                 done && h(Fragment, null,
-                    h(ProgressBar, { progress: 100, message: 'Sauvegarde terminée.', done: true }),
+                    h(ProgressBar, { progress: 100, message: __( 'Backup complete.', 'clone-master' ), done: true }),
                     result && h('div', { className: 'wpcm-alert wpcm-alert-success', style: { marginTop: '16px' } },
                         h(Ico, { n: 'check', s: 16 }),
                         h('div', null,
                             h('strong', null, result.filename), ' (', result.size, ')',
                             h('div', { style: { marginTop: '8px' } },
                                 h('a', { href: result.download_url, className: 'wpcm-btn wpcm-btn-success wpcm-btn-sm', style: { textDecoration: 'none' } },
-                                    h(Ico, { n: 'download', s: 13 }), 'Télécharger l\'archive'
+                                    h(Ico, { n: 'download', s: 13 }), __( 'Download archive', 'clone-master' )
                                 )
                             )
                         )
@@ -229,7 +231,7 @@
                     h('button', {
                         className: 'wpcm-btn wpcm-btn-ghost', style: { marginTop: '12px' },
                         onClick: () => { setDone(false); setProgress(0); setResult(null); setLogs([]); }
-                    }, 'Nouvelle sauvegarde')
+                    }, __( 'New backup', 'clone-master' ))
                 ),
 
                 error && h('div', { className: 'wpcm-alert wpcm-alert-error', style: { marginTop: '12px' } },
@@ -257,7 +259,6 @@
         const [sessionId, setSessionId] = useState(initialSessionId);
         const [filePath, setFilePath] = useState(initialFilePath);
         const [opts, setOpts] = useState({
-            locale:           '',
             reset_permalinks: true,
             block_indexing:   false,  // désactivé par défaut — à cocher intentionnellement
         });
@@ -330,9 +331,9 @@
 
                     // 413 = trop gros → diviser par 2 et réessayer (max 3 fois)
                     if (resp.status === 413) {
-                        if (attempt >= 3) throw new Error('Le serveur rejette les chunks même à ' + Math.round(chunkSize / 1024) + ' Ko (HTTP 413). Vérifiez upload_max_filesize dans php.ini.');
+                        if (attempt >= 3) throw new Error('The server rejects chunks even at ' + Math.round(chunkSize / 1024) + ' KB (HTTP 413). Check upload_max_filesize in php.ini.');
                         chunkSize = Math.max(MIN_CHUNK, Math.floor(chunkSize / 2));
-                        log('⚠ HTTP 413 — chunk réduit à ' + Math.round(chunkSize / 1024) + ' Ko', 'warn');
+                        log('⚠ HTTP 413 — chunk reduced to ' + Math.round(chunkSize / 1024) + ' KB', 'warn');
                         // On re-découpe et renvoie
                         return null; // signal pour redémarrer la boucle sur ce chunk
                     }
@@ -356,7 +357,7 @@
                     let totalSent = 0;
                     const fileSize = file.size;
 
-                    log('Envoi adaptatif de ' + (fileSize / 1048576).toFixed(1) + ' Mo — taille initiale : ' + Math.round(chunkSize / 1024) + ' Ko');
+                    log( __( 'Adaptive upload of ', 'clone-master' ) + (fileSize / 1048576).toFixed(1) + ' MB — initial size: ' + Math.round(chunkSize / 1024) + ' KB');
 
                     while (offset < fileSize) {
                         const blob = file.slice(offset, Math.min(offset + chunkSize, fileSize));
@@ -374,7 +375,7 @@
                                 // 413 : chunkSize a été réduit, on recrée le blob et réessaie
                                 const newBlob = file.slice(offset, Math.min(offset + chunkSize, fileSize));
                                 result = await sendChunk(newBlob, chunkIndex, Math.ceil(fileSize / chunkSize), uid);
-                                if (result === null) throw new Error('Impossible d\'envoyer ce chunk même après réduction.');
+                                if (result === null) throw new Error('Failed to send this chunk even after size reduction.');
                             }
                         }
 
@@ -389,7 +390,7 @@
                         const totalMo = (fileSize / 1048576).toFixed(1);
                         const speedMbps = smoothedBps ? (smoothedBps * 8 / 1000).toFixed(1) : '…';
                         setProgress(pct);
-                        setMessage(sentMo + ' / ' + totalMo + ' Mo envoyés — ' + speedMbps + ' Mbps');
+                        setMessage(sentMo + ' / ' + totalMo + ' MB sent — ' + speedMbps + ' Mbps');
 
                         // Adapter la taille du prochain chunk
                         if (smoothedBps !== null) {
@@ -398,27 +399,27 @@
                             if (Math.abs(next - chunkSize) / chunkSize > 0.15) { // n'ajuster que si >15 % d'écart
                                 const prevKo = Math.round(chunkSize / 1024);
                                 chunkSize = next;
-                                log('  Débit : ' + speedMbps + ' Mbps — chunk ajusté : ' + prevKo + ' Ko → ' + Math.round(next / 1024) + ' Ko', 'success');
+                                log('  Speed: ' + speedMbps + ' Mbps — chunk adjusted: ' + prevKo + ' KB → ' + Math.round(next / 1024) + ' KB', 'success');
                             }
                         }
 
-                        if (r.complete) { fp = r.file_path; sid = r.session_id; log(r.message || 'Envoi terminé', 'success'); }
+                        if (r.complete) { fp = r.file_path; sid = r.session_id; log(r.message || 'Upload complete', 'success'); }
                     }
                 } else {
-                    log('Envoi direct de l\'archive (' + (file.size / 1048576).toFixed(1) + ' Mo)…');
+                    log( __( 'Sending archive directly (', 'clone-master' ) + (file.size / 1048576).toFixed(1) + ' MB)…');
                     const r = await api('wpcm_import_upload', { backup_file: file });
                     fp = r.file_path; sid = r.session_id;
-                    log('Archive reçue avec succès.', 'success');
+                    log('Archive received successfully.', 'success');
                 }
                 setProgress(10);
-                log('Analyse de l\'archive…');
+                log( __( 'Analysing archive…', 'clone-master' ));
                 const ext = await apiRetry('wpcm_import', { step: 'extract', session_id: sid, file_path: fp, new_url: newUrl }, MAX_RETRIES, log);
                 setSessionId(ext.session_id); setFilePath(fp);
                 setProgress(ext.progress); setMessage(ext.message);
                 if (ext.manifest) setManifest(ext.manifest);
                 log(ext.message, 'success');
                 setPhase('opts');
-            } catch (e) { setError(e.message); log('Erreur : ' + e.message, 'error'); setPhase('error'); }
+            } catch (e) { setError(e.message); log( __( 'Error: ', 'clone-master' ) + e.message, 'error'); setPhase('error'); }
         };
 
         const runImport = async () => {
@@ -435,7 +436,7 @@
                 crypto.getRandomValues(_rawBytes);
                 const clientToken = Array.from(_rawBytes).map(b => b.toString(16).padStart(2, '0')).join('');
 
-                log('Préparation de l\'installeur…');
+                log( __( 'Preparing installer…', 'clone-master' ));
                 const prep = await apiRetry('wpcm_import', {
                     step: 'prepare', session_id: sessionId, file_path: filePath,
                     new_url: newUrl, import_opts: JSON.stringify(opts),
@@ -443,7 +444,7 @@
                 }, MAX_RETRIES, log);
                 // auth_token is intentionally absent from the response — the server never returns it.
                 const { installer_url: url } = prep;
-                log('Installeur prêt.', 'success');
+                log( __( 'Installer ready.', 'clone-master' ), 'success');
 
                 let step = 'database';
                 let dbIdx = 0, dbOff = 0, dbQ = 0, dbE = 0;
@@ -459,26 +460,26 @@
                     const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 600000);
                     let resp;
                     try { resp = await fetch(url, { method: 'POST', body: fd, signal: ctrl.signal }); }
-                    catch (fe) { clearTimeout(t); throw new Error('Erreur réseau sur l\'étape "' + step + '" : ' + fe.message); }
+                    catch (fe) { clearTimeout(t); throw new Error('Network error on step "' + step + '": ' + fe.message); }
                     clearTimeout(t);
 
                     let data;
                     const raw = await resp.text();
                     try { data = JSON.parse(raw.replace(/^\uFEFF|^[\s\xEF\xBB\xBF]+/, '')); }
                     catch {
-                        let m = 'Réponse invalide sur l\'étape "' + step + '". ';
-                        if (raw.includes('Fatal error')) m += 'Erreur PHP fatale. ';
-                        if (raw.includes('Maximum execution time')) m += 'Délai PHP dépassé. ';
-                        if (raw.includes('Allowed memory size')) m += 'Mémoire insuffisante. ';
-                        if (!raw.trim()) m += 'Réponse vide — le serveur a peut-être expiré. ';
+                        let m = 'Invalid response on step "' + step + '". ';
+                        if (raw.includes('Fatal error')) m += 'Fatal PHP error detected. ';
+                        if (raw.includes('Maximum execution time')) m += 'PHP execution time exceeded. ';
+                        if (raw.includes('Allowed memory size')) m += 'Insufficient memory. ';
+                        if (!raw.trim()) m += 'Empty response — server may have timed out. ';
                         throw new Error(m + ' | ' + raw.substring(0, 200).replace(/<[^>]+>/g, '').trim());
                     }
-                    if (!data.success) throw new Error(data.data?.message || 'Erreur installeur sur "' + step + '"');
+                    if (!data.success) throw new Error(data.data?.message || 'Installer error on step "' + step + '"');
 
                     const d = data.data;
                     lastResult = d;
                     setProgress(d.progress || 0); setMessage(d.message || '');
-                    log(d.message || step + ' terminé', 'success');
+                    log(d.message || step + ' done', 'success');
                     if (d.errors_log) d.errors_log.forEach(e => log('  SQL : ' + e, 'warn'));
 
                     if (step === 'database') { dbIdx = d.file_index ?? dbIdx; dbOff = d.byte_offset ?? 0; dbQ = d.queries ?? dbQ; dbE = d.errors ?? dbE; }
@@ -487,10 +488,10 @@
                 }
                 if (lastResult && lastResult.deactivated_plugins && lastResult.deactivated_plugins.length) {
                     setDeactivated(lastResult.deactivated_plugins);
-                    log('Plugins mis en veille (' + lastResult.deactivated_plugins.length + ') : ' + lastResult.deactivated_plugins.join(', '), 'warn');
+                    log('Plugins put on standby (' + lastResult.deactivated_plugins.length + '): ' + lastResult.deactivated_plugins.join(', '), 'warn');
                 }
-                setPhase('done'); log('Migration terminée avec succès.', 'success');
-            } catch (e) { setError(e.message); log('Erreur : ' + e.message, 'error'); setPhase('error'); }
+                setPhase('done'); log( __( 'Migration completed successfully.', 'clone-master' ), 'success');
+            } catch (e) { setError(e.message); log( __( 'Error: ', 'clone-master' ) + e.message, 'error'); setPhase('error'); }
         };
 
         const reset = () => { setPhase('idle'); setProgress(0); setFile(null); setManifest(null); setLogs([]); setError(null); setSessionId(''); setFilePath(''); setDeactivated([]); };
@@ -503,13 +504,13 @@
                     h('div', { className: 'wpcm-intro' },
                         h('div', { className: 'wpcm-intro-ico' }, h(Ico, { n: 'import', s: 18 })),
                         h('div', null,
-                            h('h4', null, 'Restaurer ou migrer votre site'),
-                            h('p', null, 'Chargez une archive WP Clone Master pour restaurer votre site sur cet hébergement. Toutes les URLs sont remplacées automatiquement, y compris dans les données sérialisées.')
+                            h('h4', null, __( 'Restore or migrate your site', 'clone-master' )),
+                            h('p', null, __( 'Upload a Clone Master archive to restore your site on this host. All URLs are replaced automatically, including in serialised data.', 'clone-master' ))
                         )
                     ),
                     h('div', { className: 'wpcm-card' },
-                        h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'import' }), 'Sélectionner une archive'),
-                        h('p', { className: 'wpcm-card-desc' }, 'Déposez votre fichier .zip ou cliquez pour le sélectionner. Les fichiers volumineux sont envoyés en plusieurs parties pour éviter les limitations serveur.'),
+                        h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'import' }), __( 'Select an archive', 'clone-master' )),
+                        h('p', { className: 'wpcm-card-desc' }, __( 'Drop your .zip file or click to select it. Large files are sent in parts to work around server limits.', 'clone-master' )),
                         h('div', {
                             className: 'wpcm-upload-zone' + (dragOver ? ' dragover' : '') + (file ? ' has-file' : ''),
                             onClick: () => fileRef.current && fileRef.current.click(),
@@ -519,22 +520,22 @@
                         },
                             h('input', { type: 'file', ref: fileRef, accept: '.zip', style: { display: 'none' }, onChange: e => setFile(e.target.files[0]) }),
                             h('div', { className: 'wpcm-upload-ico' }, h(Ico, { n: 'upload', s: 22 })),
-                            h('p', { className: 'wpcm-upload-name' }, file ? file.name + ' — ' + (file.size / 1048576).toFixed(1) + ' Mo' : 'Déposez votre archive ici'),
-                            h('p', { className: 'wpcm-upload-hint' }, file ? 'Cliquez pour choisir un autre fichier' : 'Format accepté : .zip — ou cliquez pour parcourir')
+                            h('p', { className: 'wpcm-upload-name' }, file ? file.name + ' — ' + (file.size / 1048576).toFixed(1) + ' MB' : __( 'Drop your archive here', 'clone-master' )),
+                            h('p', { className: 'wpcm-upload-hint' }, file ? __( 'Click to choose a different file', 'clone-master' ) : __( 'Accepted format: .zip — or click to browse', 'clone-master' ))
                         ),
                         file && h(Fragment, null,
                             h('div', { className: 'wpcm-field', style: { marginTop: '20px' } },
-                                h('label', { className: 'wpcm-label' }, 'URL de destination'),
-                                h('input', { className: 'wpcm-input', type: 'url', value: newUrl, onChange: e => setNewUrl(e.target.value), placeholder: 'https://votre-domaine.com' }),
-                                h('span', { className: 'wpcm-input-hint' }, 'Laissez l\'URL actuelle si vous restaurez sur le même domaine.')
+                                h('label', { className: 'wpcm-label' }, __( 'Destination URL', 'clone-master' )),
+                                h('input', { className: 'wpcm-input', type: 'url', value: newUrl, onChange: e => setNewUrl(e.target.value), placeholder: 'https://your-domain.com' }),
+                                h('span', { className: 'wpcm-input-hint' }, __( 'Leave as-is if restoring on the same domain.', 'clone-master' ))
                             ),
                             newUrl !== wpcmData.siteUrl && h('div', { className: 'wpcm-alert wpcm-alert-warning' },
                                 h(Ico, { n: 'warn', s: 15 }),
-                                'Les URLs seront remplacées dans toute la base de données → ' + newUrl
+                                'URLs will be replaced throughout the database → ' + newUrl
                             ),
                             h('div', { style: { marginTop: '16px' } },
                                 h('button', { className: 'wpcm-btn wpcm-btn-primary wpcm-btn-lg', onClick: runUploadAndExtract },
-                                    h(Ico, { n: 'upload', s: 16 }), 'Analyser l\'archive'
+                                    h(Ico, { n: 'upload', s: 16 }), __( 'Analyse archive', 'clone-master' )
                                 )
                             )
                         )
@@ -542,25 +543,25 @@
                 );
 
                 case 'uploading': return h('div', { className: 'wpcm-card' },
-                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'upload' }), 'Envoi de l\'archive en cours…'),
+                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'upload' }), __( 'Uploading archive…', 'clone-master' )),
                     h(ProgressBar, { progress, message }),
                     h('div', { className: 'wpcm-running-row' },
                         h('span', { className: 'wpcm-spinner' }),
-                        'Votre fichier est en cours d\'envoi — veuillez ne pas fermer cette page.'
+                        __( 'Uploading — please do not close this page.', 'clone-master' )
                     )
                 );
 
                 case 'opts': return h('div', { className: 'wpcm-card' },
-                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'settings' }), 'Paramètres de restauration'),
-                    h('p', { className: 'wpcm-card-desc' }, 'Vérifiez les informations de l\'archive et configurez les options avant de lancer la restauration.'),
+                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'settings' }), __( 'Restore settings', 'clone-master' )),
+                    h('p', { className: 'wpcm-card-desc' }, __( 'Check the information and configure the options before starting the restore.', 'clone-master' )),
                     manifest && h(Fragment, null,
-                        h('div', { className: 'wpcm-opts-section-title', style: { marginBottom: '10px' } }, h(Ico, { n: 'db', s: 14 }), 'Source de l\'archive'),
+                        h('div', { className: 'wpcm-opts-section-title', style: { marginBottom: '10px' } }, h(Ico, { n: 'db', s: 14 }), 'Archive source'),
                         h('div', { className: 'wpcm-manifest-grid' },
                             [
                                 ['URL source', manifest.site_url],
                                 ['Version WP', manifest.wp_version],
-                                ['Créée le', manifest.created_at],
-                                ['Thème actif', manifest.active_theme],
+                                ['Created on', manifest.created_at],
+                                ['Active theme', manifest.active_theme],
                                 ['Extensions', (manifest.active_plugins || []).length + ' actives'],
                                 ['Tables', manifest.tables_count + ' tables DB'],
                             ].map(([lbl, val]) => h('div', { className: 'wpcm-manifest-item', key: lbl },
@@ -570,11 +571,11 @@
                         )
                     ),
                     h('div', { className: 'wpcm-opts-section' },
-                        h('div', { className: 'wpcm-opts-section-title' }, h(Ico, { n: 'link', s: 14 }), 'URL de destination'),
+                        h('div', { className: 'wpcm-opts-section-title' }, h(Ico, { n: 'link', s: 14 }), __( 'Destination URL', 'clone-master' )),
                         h('div', { className: 'wpcm-field', style: { marginBottom: 0 } },
-                            h('label', { className: 'wpcm-label' }, 'Nouvelle URL du site'),
-                            h('input', { className: 'wpcm-input', type: 'url', value: newUrl, onChange: e => setNewUrl(e.target.value), placeholder: 'https://votre-domaine.com' }),
-                            h('span', { className: 'wpcm-input-hint' }, 'Toutes les occurrences de l\'ancienne URL seront remplacées dans la base de données.')
+                            h('label', { className: 'wpcm-label' }, __( 'New site URL', 'clone-master' )),
+                            h('input', { className: 'wpcm-input', type: 'url', value: newUrl, onChange: e => setNewUrl(e.target.value), placeholder: 'https://your-domain.com' }),
+                            h('span', { className: 'wpcm-input-hint' }, __( 'All occurrences of the old URL will be replaced in the database.', 'clone-master' ))
                         ),
                         newUrl !== wpcmData.siteUrl && h('div', { className: 'wpcm-alert wpcm-alert-warning', style: { marginTop: '10px' } },
                             h(Ico, { n: 'warn', s: 15 }),
@@ -582,35 +583,14 @@
                         )
                     ),
                     h('div', { className: 'wpcm-opts-section' },
-                        h('div', { className: 'wpcm-opts-section-title' }, h(Ico, { n: 'globe', s: 14 }), 'Langue'),
-                        h('div', { className: 'wpcm-field', style: { marginBottom: 0 } },
-                            h('label', { className: 'wpcm-label' }, 'Langue WordPress'),
-                            h('select', { className: 'wpcm-input', value: opts.locale, onChange: e => setOpts(o => ({ ...o, locale: e.target.value })) },
-                                h('option', { value: '' }, 'Conserver la langue de l\'archive' + (manifest && manifest.locale ? ' (' + manifest.locale + ')' : '')),
-                                h('option', { value: 'fr_FR' }, 'Français (France)'),
-                                h('option', { value: 'fr_BE' }, 'Français (Belgique)'),
-                                h('option', { value: 'fr_CA' }, 'Français (Canada)'),
-                                h('option', { value: 'en_US' }, 'English (US)'),
-                                h('option', { value: 'es_ES' }, 'Español'),
-                                h('option', { value: 'de_DE' }, 'Deutsch'),
-                                h('option', { value: 'it_IT' }, 'Italiano'),
-                                h('option', { value: 'nl_NL' }, 'Nederlands'),
-                                h('option', { value: 'pt_PT' }, 'Português'),
-                                h('option', { value: 'pt_BR' }, 'Português (Brasil)'),
-                                h('option', { value: 'ja' }, '日本語'),
-                                h('option', { value: 'zh_CN' }, '中文 (简体)')
-                            )
-                        )
-                    ),
-                    h('div', { className: 'wpcm-opts-section' },
-                        h('div', { className: 'wpcm-opts-section-title' }, h(Ico, { n: 'settings', s: 14 }), 'Options avancées'),
+                        h('div', { className: 'wpcm-opts-section-title' }, h(Ico, { n: 'settings', s: 14 }), 'Advanced options'),
 
                         /* Permaliens */
                         h('label', { className: 'wpcm-toggle-row' },
                             h('input', { type: 'checkbox', checked: opts.reset_permalinks, onChange: e => setOpts(o => ({ ...o, reset_permalinks: e.target.checked })) }),
                             h('span', null,
-                                h('span', { className: 'wpcm-toggle-strong' }, 'Régénérer les permaliens'),
-                                h('span', { className: 'wpcm-toggle-sub' }, 'Supprime les règles de réécriture mises en cache — WordPress les recréera au premier chargement.')
+                                h('span', { className: 'wpcm-toggle-strong' }, __( 'Regenerate permalinks', 'clone-master' )),
+                                h('span', { className: 'wpcm-toggle-sub' }, __( 'Deletes cached rewrite rules — WordPress will regenerate them on first load.', 'clone-master' ))
                             )
                         ),
 
@@ -618,58 +598,58 @@
                         h('label', { className: 'wpcm-toggle-row' },
                             h('input', { type: 'checkbox', checked: opts.block_indexing, onChange: e => setOpts(o => ({ ...o, block_indexing: e.target.checked })) }),
                             h('span', null,
-                                h('span', { className: 'wpcm-toggle-strong' }, 'Masquer le site aux moteurs de recherche'),
-                                h('span', { className: 'wpcm-toggle-sub' }, 'Demande à Google & Bing de ne pas indexer ce site (option "Décourager les moteurs de recherche" dans WordPress). Recommandé pendant la vérification post-migration — à décocher une fois le site validé.')
+                                h('span', { className: 'wpcm-toggle-strong' }, __( 'Hide site from search engines', 'clone-master' )),
+                                h('span', { className: 'wpcm-toggle-sub' }, __( 'Asks Google & Bing not to index this site (WordPress "Discourage search engines" option). Recommended during post-migration validation — uncheck once verified.', 'clone-master' ))
                             )
                         ),
 
                     ),
                     h('div', { style: { display: 'flex', gap: '10px', marginTop: '8px' } },
                         h('button', { className: 'wpcm-btn wpcm-btn-primary wpcm-btn-lg', onClick: runImport },
-                            h(Ico, { n: 'restore', s: 16 }), 'Lancer la restauration'
+                            h(Ico, { n: 'restore', s: 16 }), __( 'Start restore', 'clone-master' )
                         ),
                         h('button', { className: 'wpcm-btn wpcm-btn-ghost', onClick: reset }, 'Annuler')
                     )
                 );
 
                 case 'importing': return h('div', { className: 'wpcm-card' },
-                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'restore' }), 'Restauration en cours…'),
+                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'restore' }), __( 'Restoring…', 'clone-master' )),
                     h(ProgressBar, { progress, message }),
                     h('div', { className: 'wpcm-running-row' },
                         h('span', { className: 'wpcm-spinner' }),
-                        'Traitement en cours — veuillez ne pas fermer cette page.'
+                        __( 'Processing — please do not close this page.', 'clone-master' )
                     )
                 );
 
                 case 'done': return h('div', { className: 'wpcm-card' },
-                    h(ProgressBar, { progress: 100, message: 'Restauration terminée.', done: true }),
+                    h(ProgressBar, { progress: 100, message: __( 'Restore complete.', 'clone-master' ), done: true }),
                     h('div', { className: 'wpcm-complete-box' },
                         h('div', { className: 'wpcm-complete-icon' }, h(Ico, { n: 'check', s: 26 })),
-                        h('h3', { className: 'wpcm-complete-title' }, 'Votre site a été restauré avec succès !'),
-                        h('p', { className: 'wpcm-complete-sub' }, 'La migration est terminée. Veuillez vous reconnecter à l\'administration WordPress pour vérifier que tout fonctionne correctement.'),
+                        h('h3', { className: 'wpcm-complete-title' }, __( 'Your site has been restored successfully!', 'clone-master' )),
+                        h('p', { className: 'wpcm-complete-sub' }, __( 'The migration is complete. Please log back into the WordPress admin to verify everything is working correctly.', 'clone-master' )),
                         deactivated.length > 0 && h('div', { className: 'wpcm-alert wpcm-alert-warning', style: { textAlign: 'left', marginBottom: '16px' } },
                             h(Ico, { n: 'warn', s: 15 }),
                             h('div', null,
-                                h('strong', null, deactivated.length + ' plugin(s) mis en veille pour votre sécurité'),
+                                h('strong', null, deactivated.length + __( ' plugin(s) put on standby for your security', 'clone-master' )),
                                 h('p', { style: { margin: '4px 0 8px', fontSize: '12px', lineHeight: '1.5' } },
-                                    'Ces extensions de sécurité ou de cache ont été désactivées car elles peuvent bloquer l\'accès après migration (pare-feu WAF, CAPTCHA lié au domaine source, etc.). Réactivez-les manuellement après vous être reconnecté.'
+                                    __( 'These security or cache plugins have been deactivated because they can block access after migration (WAF firewall, CAPTCHA tied to source domain, etc.). Re-enable them manually after logging back in.', 'clone-master' )
                                 ),
                                 h('ul', { style: { margin: '0', paddingLeft: '18px', fontSize: '11.5px', fontFamily: 'var(--c-mono)' } },
                                     deactivated.map((p, i) => h('li', { key: i }, p))
                                 )
                             )
                         ),
-                        h('button', { className: 'wpcm-btn wpcm-btn-ghost', onClick: reset }, 'Nouvelle restauration')
+                        h('button', { className: 'wpcm-btn wpcm-btn-ghost', onClick: reset }, __( 'New restore', 'clone-master' ))
                     )
                 );
 
                 case 'error': return h('div', { className: 'wpcm-card' },
-                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'x' }), 'Une erreur est survenue'),
+                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'x' }), __( 'An error occurred', 'clone-master' )),
                     h('div', { className: 'wpcm-alert wpcm-alert-error', style: { marginTop: 0 } },
-                        h(Ico, { n: 'x', s: 15 }), error || 'Erreur inconnue'
+                        h(Ico, { n: 'x', s: 15 }), error || __( 'Unknown error', 'clone-master' )
                     ),
                     h('div', { style: { marginTop: '16px' } },
-                        h('button', { className: 'wpcm-btn wpcm-btn-ghost', onClick: reset }, '← Recommencer')
+                        h('button', { className: 'wpcm-btn wpcm-btn-ghost', onClick: reset }, __( '← Start over', 'clone-master' ))
                     )
                 );
 
@@ -698,10 +678,10 @@
         useEffect(() => { load(); }, [load]);
 
         const del = async name => {
-            if (!confirm('Supprimer définitivement cette sauvegarde ?\n\n' + name)) return;
+            if (!confirm( __( 'Permanently delete this backup?', 'clone-master' ) + '\n\n' + name)) return;
             setDeleting(name);
             try { await api('wpcm_delete_backup', { backup_name: name }); load(); }
-            catch (e) { alert('Erreur : ' + e.message); }
+            catch (e) { alert( __( 'Error: ', 'clone-master' ) + e.message); }
             finally { setDeleting(null); }
         };
 
@@ -709,47 +689,54 @@
 
         return h('div', { className: 'wpcm-card' },
             h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' } },
-                h('h3', { className: 'wpcm-card-title', style: { margin: 0 } }, h(Ico, { n: 'archive' }), 'Vos sauvegardes'),
-                h('button', { className: 'wpcm-btn wpcm-btn-ghost wpcm-btn-sm', onClick: load }, 'Actualiser')
+                h('h3', { className: 'wpcm-card-title', style: { margin: 0 } }, h(Ico, { n: 'archive' }), __( 'Your backups', 'clone-master' )),
+                h('button', { className: 'wpcm-btn wpcm-btn-ghost wpcm-btn-sm', onClick: load }, __( 'Refresh', 'clone-master' ))
             ),
-            h('p', { className: 'wpcm-card-desc' }, 'Toutes vos archives sont listées ici. Téléchargez-les pour les conserver ou restaurez-les directement sur ce site.'),
+            h('p', { className: 'wpcm-card-desc' }, __( 'All your archives are listed here. Download them for safekeeping or restore them directly on this site.', 'clone-master' )),
 
             loading && h('div', { style: { textAlign: 'center', padding: '32px' } }, h('span', { className: 'wpcm-spinner' })),
 
             !loading && backups.length === 0 && h('div', { className: 'wpcm-empty' },
                 h('div', { className: 'wpcm-empty-ico' }, h(Ico, { n: 'archive', s: 22 })),
-                h('p', null, 'Aucune sauvegarde disponible. Lancez une exportation pour en créer une.')
+                h('p', null, __( 'No backups available. Run an export to create one.', 'clone-master' ))
             ),
 
             !loading && backups.length > 0 && h('div', { className: 'wpcm-table-wrap' },
                 h('table', { className: 'wpcm-table' },
                     h('thead', null, h('tr', null,
-                        h('th', null, 'Fichier'),
-                        h('th', null, 'Taille'),
-                        h('th', null, 'Date'),
-                        h('th', { className: 'col-actions' }, 'Actions')
+                        h('th', null, __( 'File', 'clone-master' )),
+                        h('th', null, __( 'Size', 'clone-master' )),
+                        h('th', null, __( 'Date', 'clone-master' )),
+                        h('th', null, __( 'Origin', 'clone-master' )),
+                        h('th', { className: 'col-actions' }, __( 'Actions', 'clone-master' ))
                     )),
                     h('tbody', null, backups.map(b =>
                         h('tr', { key: b.name },
                             h('td', null, h('span', { className: 'wpcm-filename', title: b.name }, b.name)),
                             h('td', null, h('span', { className: 'wpcm-filesize' }, b.size)),
                             h('td', null, h('span', { className: 'wpcm-filedate' }, b.date)),
+                            h('td', null,
+                                h('span', {
+                                    className: 'wpcm-badge ' + (b.origin === 'Nextcloud' ? 'wpcm-badge-nc' : 'wpcm-badge-local'),
+                                    title: b.origin
+                                }, b.origin || __( 'Local storage', 'clone-master' ))
+                            ),
                             h('td', { className: 'col-actions' },
                                 h('div', { className: 'wpcm-table-actions' },
                                     h('button', {
                                         className: 'wpcm-btn wpcm-btn-blue wpcm-btn-sm',
                                         onClick: () => onRestore && onRestore(b),
-                                        title: 'Restaurer cette sauvegarde'
-                                    }, h(Ico, { n: 'restore', s: 13 }), 'Restaurer'),
+                                        title: __( 'Restore this backup', 'clone-master' )
+                                    }, h(Ico, { n: 'restore', s: 13 }), __( 'Restore', 'clone-master' )),
                                     h('a', {
                                         href: dlUrl(b.name), className: 'wpcm-btn wpcm-btn-ghost wpcm-btn-sm',
-                                        style: { textDecoration: 'none' }, title: 'Télécharger'
-                                    }, h(Ico, { n: 'download', s: 13 }), 'Télécharger'),
+                                        style: { textDecoration: 'none' }, title: 'Download'
+                                    }, h(Ico, { n: 'download', s: 13 }), __( 'Download', 'clone-master' )),
                                     h('button', {
                                         className: 'wpcm-btn wpcm-btn-danger wpcm-btn-sm',
                                         onClick: () => del(b.name),
                                         disabled: deleting === b.name,
-                                        title: 'Supprimer'
+                                        title: __( 'Delete', 'clone-master' )
                                     }, deleting === b.name ? h('span', { className: 'wpcm-spinner' }) : h(Ico, { n: 'trash', s: 13 }))
                                 )
                             )
@@ -769,7 +756,7 @@
         useEffect(() => { api('wpcm_server_info').then(setInfo).catch(console.error).finally(() => setLoading(false)); }, []);
 
         if (loading) return h('div', { style: { textAlign: 'center', padding: '48px' } }, h('span', { className: 'wpcm-spinner' }));
-        if (!info) return h('div', { className: 'wpcm-alert wpcm-alert-error', style: { margin: 0 } }, 'Impossible de charger les informations serveur.');
+        if (!info) return h('div', { className: 'wpcm-alert wpcm-alert-error', style: { margin: 0 } }, __( 'Failed to load server information.', 'clone-master' ));
 
         const fmt = b => {
             if (!b) return 'N/A';
@@ -784,10 +771,10 @@
                     ['PHP', info.php?.version, 'ok'],
                     ['MySQL', info.mysql?.version, 'ok'],
                     ['WordPress', info.wordpress?.version, 'ok'],
-                    ['Serveur', info.server?.type, ''],
-                    ['Base de données', fmt(info.mysql?.total_size), ''],
-                    ['Médias', fmt(info.wordpress?.uploads_size), ''],
-                    ['Espace libre', info.disk?.free_human, info.disk?.free > 1073741824 ? 'ok' : 'warn'],
+                    [__( 'Server', 'clone-master' ), info.server?.type, ''],
+                    ['Database', fmt(info.mysql?.total_size), ''],
+                    ['Media', fmt(info.wordpress?.uploads_size), ''],
+                    [__( 'Free disk space', 'clone-master' ), info.disk?.free_human, info.disk?.free > 1073741824 ? 'ok' : 'warn'],
                     ['Upload max.', info.limits?.wp_max_upload_human, ''],
                 ].map(([lbl, val, cls]) =>
                     h('div', { className: 'wpcm-stat-card', key: lbl },
@@ -798,15 +785,15 @@
             ),
 
             h('div', { className: 'wpcm-card' },
-                h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'server' }), 'Limites serveur'),
+                h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'server' }), __( 'Server limits', 'clone-master' )),
                 h('div', { className: 'wpcm-info-grid' },
                     [
-                        ['Mémoire PHP', info.limits?.memory_limit_human],
-                        ['Temps d\'exécution', info.limits?.max_execution_time + 's'],
-                        ['Taille de chunk', fmt(info.limits?.recommended_chunk)],
-                        ['Préfixe des tables', info.mysql?.prefix],
-                        ['Nombre de tables', info.mysql?.table_count],
-                        ['Multisite', info.wordpress?.multisite ? 'Oui' : 'Non'],
+                        [__( 'PHP memory', 'clone-master' ), info.limits?.memory_limit_human],
+                        [__( 'Execution time', 'clone-master' ), info.limits?.max_execution_time + 's'],
+                        [__( 'Chunk size', 'clone-master' ), fmt(info.limits?.recommended_chunk)],
+                        [__( 'Table prefix', 'clone-master' ), info.mysql?.prefix],
+                        [__( 'Table count', 'clone-master' ), info.mysql?.table_count],
+                        ['Multisite', info.wordpress?.multisite ? __( 'Yes', 'clone-master' ) : __( 'No', 'clone-master' )],
                     ].map(([l, v]) =>
                         h('div', { className: 'wpcm-info-row', key: l },
                             h('span', { className: 'wpcm-info-lbl' }, l),
@@ -817,7 +804,7 @@
             ),
 
             h('div', { className: 'wpcm-card' },
-                h('h3', { className: 'wpcm-card-title' }, 'Extensions PHP'),
+                h('h3', { className: 'wpcm-card-title' }, __( 'PHP Extensions', 'clone-master' )),
                 h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '7px' } },
                     Object.entries(info.extensions || {}).map(([name, ext]) =>
                         h('span', { key: name, className: 'wpcm-badge ' + (ext.loaded ? 'wpcm-badge-ok' : (ext.required ? 'wpcm-badge-bad' : 'wpcm-badge-warn')) },
@@ -828,13 +815,13 @@
             ),
 
             h('div', { className: 'wpcm-card' },
-                h('h3', { className: 'wpcm-card-title' }, 'Permissions des répertoires'),
+                h('h3', { className: 'wpcm-card-title' }, __( 'Directory permissions', 'clone-master' )),
                 h('div', { className: 'wpcm-info-grid' },
                     Object.entries(info.writable || {}).map(([dir, ok]) =>
                         h('div', { className: 'wpcm-info-row', key: dir },
                             h('span', { className: 'wpcm-info-lbl' }, dir),
                             h('span', { className: 'wpcm-badge ' + (ok ? 'wpcm-badge-ok' : 'wpcm-badge-bad') },
-                                h(Ico, { n: ok ? 'check' : 'x', s: 12 }), ok ? 'Accessible' : 'Non accessible'
+                                h(Ico, { n: ok ? 'check' : 'x', s: 12 }), ok ? __( 'Writable', 'clone-master' ) : __( 'Not writable', 'clone-master' )
                             )
                         )
                     )
@@ -842,19 +829,19 @@
             ),
 
             h('div', { className: 'wpcm-card' },
-                h('h3', { className: 'wpcm-card-title' }, 'Détails WordPress'),
+                h('h3', { className: 'wpcm-card-title' }, __( 'WordPress details', 'clone-master' )),
                 h('div', { className: 'wpcm-info-grid' },
                     [
-                        ['URL du site', info.wordpress?.site_url],
-                        ['Thème actif', info.wordpress?.theme],
-                        ['Extensions actives', (info.wordpress?.plugins_active || 0) + ' / ' + (info.wordpress?.plugins_total || 0)],
-                        ['Structure des permaliens', info.wordpress?.permalink || 'Simple'],
-                        ['Chemin ABSPATH', info.wordpress?.abspath],
-                        ['Dossier wp-content', info.wordpress?.content_dir],
+                        [__( 'Site URL', 'clone-master' ), info.wordpress?.site_url],
+                        [__( 'Active theme', 'clone-master' ), info.wordpress?.theme],
+                        [__( 'Active plugins', 'clone-master' ), (info.wordpress?.plugins_active || 0) + ' / ' + (info.wordpress?.plugins_total || 0)],
+                        [__( 'Permalink structure', 'clone-master' ), info.wordpress?.permalink || __( 'Default', 'clone-master' )],
+                        [__( 'ABSPATH', 'clone-master' ), info.wordpress?.abspath],
+                        [__( 'wp-content dir', 'clone-master' ), info.wordpress?.content_dir],
                     ].map(([l, v]) =>
                         h('div', { className: 'wpcm-info-row', key: l },
                             h('span', { className: 'wpcm-info-lbl' }, l),
-                            h('span', { className: 'wpcm-info-val mono', style: l.includes('Chemin') || l.includes('Dossier') ? { fontSize: '11px' } : {} }, v || 'N/A')
+                            h('span', { className: 'wpcm-info-val mono', style: l.includes('ABSPATH') || l.includes('wp-content') ? { fontSize: '11px' } : {} }, v || 'N/A')
                         )
                     )
                 )
@@ -882,20 +869,26 @@
         const switchTab = id => { if (id !== 'import') setRestoreTarget(null); setTab(id); };
 
         const tabs = [
-            { id: 'export',  label: 'Exporter',    icon: 'export'  },
-            { id: 'import',  label: 'Restaurer',   icon: 'restore' },
-            { id: 'backups', label: 'Sauvegardes', icon: 'archive' },
-            { id: 'server',  label: 'Serveur',     icon: 'server'  },
+            { id: 'export',  label: __( 'Export', 'clone-master' ),  icon: 'export'  },
+            { id: 'import',  label: __( 'Restore', 'clone-master' ), icon: 'restore' },
+            { id: 'backups', label: __( 'Backups', 'clone-master' ), icon: 'archive' },
+            { id: 'server',  label: __( 'Server', 'clone-master' ),  icon: 'server'  },
         ];
 
         return h('div', { className: 'wpcm-app' },
             h('div', { className: 'wpcm-header' },
                 h('div', { className: 'wpcm-header-logo' }, h(Ico, { n: 'layers', s: 20 })),
                 h('div', { className: 'wpcm-header-text' },
-                    h('h1', null, 'WP Clone Master'),
-                    h('p', null, 'Sauvegarde, migration et restauration de votre site WordPress')
+                    h('h1', null, 'Clone Master'),
+                    h('p', null, __( 'Backup, migration and restore for your WordPress site', 'clone-master' ))
                 ),
-                h('span', { className: 'wpcm-header-badge' }, 'v1.0.0')
+                h('a', {
+                    href: 'https://buymeacoffee.com/assistouest',
+                    target: '_blank',
+                    rel: 'noopener noreferrer',
+                    className: 'wpcm-coffee-btn',
+                    title: (wpcmData.i18n && wpcmData.i18n.supportUs) || __( 'Support open-source', 'clone-master' ),
+                }, h(Ico, { n: 'coffee', s: 15 }), h('span', { className: 'wpcm-coffee-label' }, (wpcmData.i18n && wpcmData.i18n.supportUs) || __( 'Support open-source', 'clone-master' )))
             ),
 
             h('div', { className: 'wpcm-tabs' },
@@ -907,9 +900,9 @@
             ),
 
             tab === 'export'  && h(ExportTab),
-            tab === 'import'  && h(ImportTab, restoreTarget
-                ? { key: restoreTarget.name, initialFile: null, initialSessionId: '', initialFilePath: restoreTarget.path, _backupPath: restoreTarget.path }
-                : { key: 'manual' }
+            tab === 'import'  && (restoreTarget
+                ? h(ImportTabWithRestore, { key: restoreTarget.name, _backupName: restoreTarget.name })
+                : h(ImportTab,            { key: 'manual' })
             ),
             tab === 'backups' && h(BackupsTab, { onRestore: handleRestore }),
             tab === 'server'  && h(ServerTab)
@@ -922,14 +915,14 @@
        ========================================================= */
     const ImportTabOrig = ImportTab;
 
-    function ImportTabWithRestore({ _backupPath }) {
+    function ImportTabWithRestore({ _backupName }) {
         const [phase, setPhase] = useState('analyzing'); // analyzing | opts | importing | done | error
         const [progress, setProgress] = useState(0);
         const [message, setMessage] = useState('');
         const [manifest, setManifest] = useState(null);
         const [sessionId, setSessionId] = useState('');
         const [newUrl, setNewUrl] = useState(wpcmData.siteUrl);
-        const [opts, setOpts] = useState({ locale: '', reset_permalinks: true, block_indexing: false });
+        const [opts, setOpts] = useState({ reset_permalinks: true, block_indexing: false });
         const [logs, setLogs] = useState([]);
         const [error, setError] = useState(null);
 
@@ -941,14 +934,14 @@
         useEffect(() => {
             (async () => {
                 try {
-                    log('Analyse de la sauvegarde…');
-                    const ext = await apiRetry('wpcm_import', { step: 'extract', session_id: '', file_path: _backupPath, new_url: newUrl }, MAX_RETRIES, log);
+                    log( __( 'Analysing backup…', 'clone-master' ));
+                    const ext = await apiRetry('wpcm_import', { step: 'extract', session_id: '', backup_name: _backupName, new_url: newUrl }, MAX_RETRIES, log);
                     setSessionId(ext.session_id);
                     setProgress(ext.progress); setMessage(ext.message);
                     if (ext.manifest) setManifest(ext.manifest);
                     log(ext.message, 'success');
                     setPhase('opts');
-                } catch (e) { setError(e.message); log('Erreur : ' + e.message, 'error'); setPhase('error'); }
+                } catch (e) { setError(e.message); log( __( 'Error: ', 'clone-master' ) + e.message, 'error'); setPhase('error'); }
             })();
         }, []);
 
@@ -960,14 +953,14 @@
                 crypto.getRandomValues(_rawBytes);
                 const clientToken = Array.from(_rawBytes).map(b => b.toString(16).padStart(2, '0')).join('');
 
-                log('Préparation de l\'installeur…');
+                log( __( 'Preparing installer…', 'clone-master' ));
                 const prep = await apiRetry('wpcm_import', {
-                    step: 'prepare', session_id: sessionId, file_path: _backupPath,
+                    step: 'prepare', session_id: sessionId, backup_name: _backupName,
                     new_url: newUrl, import_opts: JSON.stringify(opts),
                     installer_token: clientToken,
                 }, MAX_RETRIES, log);
                 const { installer_url: url } = prep;
-                log('Installeur prêt.', 'success');
+                log( __( 'Installer ready.', 'clone-master' ), 'success');
 
                 let step = 'database';
                 let dbIdx = 0, dbOff = 0, dbQ = 0, dbE = 0;
@@ -982,46 +975,46 @@
                     const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 600000);
                     let resp;
                     try { resp = await fetch(url, { method: 'POST', body: fd, signal: ctrl.signal }); }
-                    catch (fe) { clearTimeout(t); throw new Error('Erreur réseau : ' + fe.message); }
+                    catch (fe) { clearTimeout(t); throw new Error('Network error: ' + fe.message); }
                     clearTimeout(t);
 
                     let data;
                     const raw = await resp.text();
                     try { data = JSON.parse(raw.replace(/^\uFEFF|^[\s\xEF\xBB\xBF]+/, '')); }
-                    catch { throw new Error('Réponse invalide sur "' + step + '" : ' + raw.substring(0, 200).replace(/<[^>]+>/g, '').trim()); }
-                    if (!data.success) throw new Error(data.data?.message || 'Erreur sur "' + step + '"');
+                    catch { throw new Error('Invalid response on "' + step + '" : ' + raw.substring(0, 200).replace(/<[^>]+>/g, '').trim()); }
+                    if (!data.success) throw new Error(data.data?.message || 'Installer error on step "' + step + '"');
 
                     const d = data.data;
                     setProgress(d.progress || 0); setMessage(d.message || '');
-                    log(d.message || step + ' terminé', 'success');
+                    log(d.message || step + ' done', 'success');
                     if (d.errors_log) d.errors_log.forEach(e => log('  SQL : ' + e, 'warn'));
                     if (step === 'database') { dbIdx = d.file_index ?? dbIdx; dbOff = d.byte_offset ?? 0; dbQ = d.queries ?? dbQ; dbE = d.errors ?? dbE; }
                     if (step === 'replace_urls') { srIdx = d.table_index ?? srIdx; srOff = d.row_offset ?? 0; srR = d.rows ?? srR; srC = d.cells ?? srC; srS = d.serial ?? srS; }
                     step = d.next_step || null;
                 }
-                setPhase('done'); log('Migration terminée avec succès.', 'success');
-            } catch (e) { setError(e.message); log('Erreur : ' + e.message, 'error'); setPhase('error'); }
+                setPhase('done'); log( __( 'Migration completed successfully.', 'clone-master' ), 'success');
+            } catch (e) { setError(e.message); log( __( 'Error: ', 'clone-master' ) + e.message, 'error'); setPhase('error'); }
         };
 
         const renderPhase = () => {
             switch (phase) {
                 case 'analyzing': return h('div', { className: 'wpcm-card' },
-                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'db' }), 'Lecture de la sauvegarde…'),
+                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'db' }), 'Reading backup…'),
                     h(ProgressBar, { progress, message }),
-                    h('div', { className: 'wpcm-running-row' }, h('span', { className: 'wpcm-spinner' }), 'Analyse de l\'archive en cours…')
+                    h('div', { className: 'wpcm-running-row' }, h('span', { className: 'wpcm-spinner' }), 'Analysing archive…')
                 );
 
                 case 'opts': return h('div', { className: 'wpcm-card' },
-                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'settings' }), 'Paramètres de restauration'),
-                    h('p', { className: 'wpcm-card-desc' }, 'Vérifiez les informations et configurez les options avant de lancer la restauration.'),
+                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'settings' }), __( 'Restore settings', 'clone-master' )),
+                    h('p', { className: 'wpcm-card-desc' }, 'Check the settings and configure the options before starting the restore.'),
                     manifest && h(Fragment, null,
-                        h('div', { className: 'wpcm-opts-section-title', style: { marginBottom: '10px' } }, h(Ico, { n: 'db', s: 14 }), 'Source de l\'archive'),
+                        h('div', { className: 'wpcm-opts-section-title', style: { marginBottom: '10px' } }, h(Ico, { n: 'db', s: 14 }), 'Archive source'),
                         h('div', { className: 'wpcm-manifest-grid' },
                             [
                                 ['URL source', manifest.site_url],
                                 ['Version WP', manifest.wp_version],
-                                ['Créée le', manifest.created_at],
-                                ['Thème actif', manifest.active_theme],
+                                ['Created on', manifest.created_at],
+                                ['Active theme', manifest.active_theme],
                                 ['Extensions', (manifest.active_plugins || []).length + ' actives'],
                                 ['Tables', manifest.tables_count + ' tables DB'],
                             ].map(([lbl, val]) => h('div', { className: 'wpcm-manifest-item', key: lbl },
@@ -1031,55 +1024,55 @@
                         )
                     ),
                     h('div', { className: 'wpcm-opts-section' },
-                        h('div', { className: 'wpcm-opts-section-title' }, h(Ico, { n: 'link', s: 14 }), 'URL de destination'),
+                        h('div', { className: 'wpcm-opts-section-title' }, h(Ico, { n: 'link', s: 14 }), __( 'Destination URL', 'clone-master' )),
                         h('div', { className: 'wpcm-field', style: { marginBottom: 0 } },
-                            h('label', { className: 'wpcm-label' }, 'Nouvelle URL du site'),
+                            h('label', { className: 'wpcm-label' }, __( 'New site URL', 'clone-master' )),
                             h('input', { className: 'wpcm-input', type: 'url', value: newUrl, onChange: e => setNewUrl(e.target.value) }),
-                            h('span', { className: 'wpcm-input-hint' }, 'Laissez l\'URL actuelle si vous restaurez sur le même domaine.')
+                            h('span', { className: 'wpcm-input-hint' }, __( 'Leave as-is if restoring on the same domain.', 'clone-master' ))
                         )
                     ),
                     h('div', { className: 'wpcm-opts-section' },
-                        h('div', { className: 'wpcm-opts-section-title' }, h(Ico, { n: 'settings', s: 14 }), 'Options avancées'),
+                        h('div', { className: 'wpcm-opts-section-title' }, h(Ico, { n: 'settings', s: 14 }), 'Advanced options'),
                         h('label', { className: 'wpcm-toggle-row' },
                             h('input', { type: 'checkbox', checked: opts.reset_permalinks, onChange: e => setOpts(o => ({ ...o, reset_permalinks: e.target.checked })) }),
                             h('span', null,
-                                h('span', { className: 'wpcm-toggle-strong' }, 'Régénérer les permaliens'),
-                                h('span', { className: 'wpcm-toggle-sub' }, 'Recommandé après chaque restauration.')
+                                h('span', { className: 'wpcm-toggle-strong' }, __( 'Regenerate permalinks', 'clone-master' )),
+                                h('span', { className: 'wpcm-toggle-sub' }, 'Recommended after every restore.')
                             )
                         ),
                         h('label', { className: 'wpcm-toggle-row' },
                             h('input', { type: 'checkbox', checked: opts.block_indexing, onChange: e => setOpts(o => ({ ...o, block_indexing: e.target.checked })) }),
                             h('span', null,
-                                h('span', { className: 'wpcm-toggle-strong' }, 'Masquer le site aux moteurs de recherche'),
-                                h('span', { className: 'wpcm-toggle-sub' }, 'Demande à Google & Bing de ne pas indexer ce site (option \"Décourager les moteurs de recherche\" dans WordPress). Recommandé pendant la vérification post-migration — à décocher une fois le site validé.')
+                                h('span', { className: 'wpcm-toggle-strong' }, __( 'Hide site from search engines', 'clone-master' )),
+                                h('span', { className: 'wpcm-toggle-sub' }, __( 'Asks Google & Bing not to index this site (WordPress "Discourage search engines" option). Recommended during post-migration validation — uncheck once verified.', 'clone-master' ))
                             )
                         )
                     ),
                     h('div', { style: { display: 'flex', gap: '10px', marginTop: '8px' } },
                         h('button', { className: 'wpcm-btn wpcm-btn-primary wpcm-btn-lg', onClick: runImport },
-                            h(Ico, { n: 'restore', s: 16 }), 'Lancer la restauration'
+                            h(Ico, { n: 'restore', s: 16 }), __( 'Start restore', 'clone-master' )
                         )
                     )
                 );
 
                 case 'importing': return h('div', { className: 'wpcm-card' },
-                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'restore' }), 'Restauration en cours…'),
+                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'restore' }), __( 'Restoring…', 'clone-master' )),
                     h(ProgressBar, { progress, message }),
-                    h('div', { className: 'wpcm-running-row' }, h('span', { className: 'wpcm-spinner' }), 'Traitement en cours — veuillez ne pas fermer cette page.')
+                    h('div', { className: 'wpcm-running-row' }, h('span', { className: 'wpcm-spinner' }), __( 'Processing — please do not close this page.', 'clone-master' ))
                 );
 
                 case 'done': return h('div', { className: 'wpcm-card' },
-                    h(ProgressBar, { progress: 100, message: 'Restauration terminée.', done: true }),
+                    h(ProgressBar, { progress: 100, message: __( 'Restore complete.', 'clone-master' ), done: true }),
                     h('div', { className: 'wpcm-complete-box' },
                         h('div', { className: 'wpcm-complete-icon' }, h(Ico, { n: 'check', s: 26 })),
-                        h('h3', { className: 'wpcm-complete-title' }, 'Votre site a été restauré avec succès !'),
-                        h('p', { className: 'wpcm-complete-sub' }, 'Reconnectez-vous à WordPress pour vérifier que tout fonctionne correctement.')
+                        h('h3', { className: 'wpcm-complete-title' }, __( 'Your site has been restored successfully!', 'clone-master' )),
+                        h('p', { className: 'wpcm-complete-sub' }, __( 'Log back into WordPress to verify everything is working correctly.', 'clone-master' ))
                     )
                 );
 
                 case 'error': return h('div', { className: 'wpcm-card' },
-                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'x' }), 'Une erreur est survenue'),
-                    h('div', { className: 'wpcm-alert wpcm-alert-error', style: { marginTop: 0 } }, h(Ico, { n: 'x', s: 15 }), error || 'Erreur inconnue')
+                    h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'x' }), __( 'An error occurred', 'clone-master' )),
+                    h('div', { className: 'wpcm-alert wpcm-alert-error', style: { marginTop: 0 } }, h(Ico, { n: 'x', s: 15 }), error || __( 'Unknown error', 'clone-master' ))
                 );
 
                 default: return null;
@@ -1101,20 +1094,26 @@
         const handleRestore = backup => { setRestoreTarget(backup); setTab('import'); };
 
         const tabs = [
-            { id: 'export',  label: 'Exporter',    icon: 'export'  },
-            { id: 'import',  label: 'Restaurer',   icon: 'restore' },
-            { id: 'backups', label: 'Sauvegardes', icon: 'archive' },
-            { id: 'server',  label: 'Serveur',     icon: 'server'  },
+            { id: 'export',  label: __( 'Export', 'clone-master' ),  icon: 'export'  },
+            { id: 'import',  label: __( 'Restore', 'clone-master' ), icon: 'restore' },
+            { id: 'backups', label: __( 'Backups', 'clone-master' ), icon: 'archive' },
+            { id: 'server',  label: __( 'Server', 'clone-master' ),  icon: 'server'  },
         ];
 
         return h('div', { className: 'wpcm-app' },
             h('div', { className: 'wpcm-header' },
                 h('div', { className: 'wpcm-header-logo' }, h(Ico, { n: 'layers', s: 20 })),
                 h('div', { className: 'wpcm-header-text' },
-                    h('h1', null, 'WP Clone Master'),
-                    h('p', null, 'Sauvegarde, migration et restauration de votre site WordPress')
+                    h('h1', null, 'Clone Master'),
+                    h('p', null, __( 'Backup, migration and restore for your WordPress site', 'clone-master' ))
                 ),
-                h('span', { className: 'wpcm-header-badge' }, 'v1.0.0')
+                h('a', {
+                    href: 'https://buymeacoffee.com/assistouest',
+                    target: '_blank',
+                    rel: 'noopener noreferrer',
+                    className: 'wpcm-coffee-btn',
+                    title: (wpcmData.i18n && wpcmData.i18n.supportUs) || __( 'Support open-source', 'clone-master' ),
+                }, h(Ico, { n: 'coffee', s: 15 }), h('span', { className: 'wpcm-coffee-label' }, (wpcmData.i18n && wpcmData.i18n.supportUs) || __( 'Support open-source', 'clone-master' )))
             ),
             h('div', { className: 'wpcm-tabs' },
                 tabs.map(t => h('button', {
@@ -1125,7 +1124,7 @@
             ),
             tab === 'export'  && h(ExportTab),
             tab === 'import'  && (restoreTarget
-                ? h(ImportTabWithRestore, { key: restoreTarget.name, _backupPath: restoreTarget.path })
+                ? h(ImportTabWithRestore, { key: restoreTarget.name, _backupName: restoreTarget.name })
                 : h(ImportTab,            { key: 'manual' })
             ),
             tab === 'backups' && h(BackupsTab, { onRestore: handleRestore }),
@@ -1139,4 +1138,5 @@
         if (wp.element.createRoot) wp.element.createRoot(root).render(h(AppFinal));
         else wp.element.render(h(AppFinal), root);
     }
+
 })();

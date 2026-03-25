@@ -1,0 +1,330 @@
+{
+  "translation-revision-date": "2026-03-23T00:00+0000",
+  "generator": "clone-master-i18n",
+  "source": "clone-master",
+  "domain": "messages",
+  "locale_data": {
+    "messages": {
+      "": {
+        "domain": "messages",
+        "lang": "fr_FR",
+        "plural-forms": "nplurals=2; plural=(n > 1);"
+      },
+      "Server error without detail": [
+        "Erreur serveur sans détail"
+      ],
+      "Unknown error": [
+        "Erreur inconnue"
+      ],
+      "Activity log": [
+        "Journal d'activité"
+      ],
+      "Show": [
+        "Afficher"
+      ],
+      "Collapse": [
+        "Réduire"
+      ],
+      "Complete backup of your site": [
+        "Sauvegarde complète de votre site"
+      ],
+      "Your database, themes, plugins, media and configuration files are securely archived. You can then restore them on any host.": [
+        "Votre base de données, vos thèmes, extensions, médias et fichiers de configuration sont archivés de façon sécurisée. Vous pouvez ensuite les restaurer sur n'importe quel hébergement."
+      ],
+      "Export your site": [
+        "Exporter votre site"
+      ],
+      "Creates a complete archive of your WordPress installation, ready to migrate or store safely.": [
+        "Crée une archive complète de votre installation WordPress, prête à migrer ou à conserver en toute sécurité."
+      ],
+      "Start full export": [
+        "Lancer la sauvegarde"
+      ],
+      "Processing, please wait…": [
+        "Traitement en cours, veuillez patienter…"
+      ],
+      "Backup created successfully.": [
+        "Sauvegarde créée avec succès."
+      ],
+      "Error: ": [
+        "Erreur : "
+      ],
+      "Backup complete.": [
+        "Sauvegarde terminée."
+      ],
+      "Download archive": [
+        "Télécharger l'archive"
+      ],
+      "Restore or migrate your site": [
+        "Restaurer ou migrer votre site"
+      ],
+      "Upload a Clone Master archive to restore your site on this host. All URLs are replaced automatically, including in serialised data.": [
+        "Chargez une archive Clone Master pour restaurer votre site sur cet hébergement. Toutes les URLs sont remplacées automatiquement, y compris dans les données sérialisées."
+      ],
+      "Select an archive": [
+        "Sélectionner une archive"
+      ],
+      "Drop your .zip file or click to select it. Large files are sent in parts to work around server limits.": [
+        "Déposez votre fichier .zip ou cliquez pour le sélectionner. Les fichiers volumineux sont envoyés en plusieurs parties pour éviter les limitations serveur."
+      ],
+      "Drop your archive here": [
+        "Déposez votre archive ici"
+      ],
+      "Accepted format: .zip — or click to browse": [
+        "Format accepté : .zip — ou cliquez pour parcourir"
+      ],
+      "Click to choose a different file": [
+        "Cliquez pour choisir un autre fichier"
+      ],
+      "Destination URL": [
+        "URL de destination"
+      ],
+      "New site URL": [
+        "Nouvelle URL du site"
+      ],
+      "Leave as-is if restoring on the same domain.": [
+        "Laissez tel quel si vous restaurez sur le même domaine."
+      ],
+      "All occurrences of the old URL will be replaced in the database.": [
+        "Toutes les occurrences de l'ancienne URL seront remplacées dans la base de données."
+      ],
+      "Analyse archive": [
+        "Analyser l'archive"
+      ],
+      "Uploading archive…": [
+        "Envoi de l'archive…"
+      ],
+      "Uploading — please do not close this page.": [
+        "Envoi en cours — veuillez ne pas fermer cette page."
+      ],
+      "Restore settings": [
+        "Paramètres de restauration"
+      ],
+      "Check the information and configure the options before starting the restore.": [
+        "Vérifiez les informations et configurez les options avant de lancer la restauration."
+      ],
+      "Regenerate permalinks": [
+        "Régénérer les permaliens"
+      ],
+      "Deletes cached rewrite rules — WordPress will regenerate them on first load.": [
+        "Supprime les règles de réécriture mises en cache — WordPress les recréera au premier chargement."
+      ],
+      "Hide site from search engines": [
+        "Masquer le site aux moteurs de recherche"
+      ],
+      "Asks Google & Bing not to index this site (WordPress \"Discourage search engines\" option). Recommended during post-migration validation — uncheck once verified.": [
+        "Demande à Google & Bing de ne pas indexer ce site (option WordPress \"Décourager les moteurs de recherche\"). Recommandé pendant la validation post-migration — à décocher une fois validé."
+      ],
+      "Start restore": [
+        "Lancer la restauration"
+      ],
+      "Restoring…": [
+        "Restauration en cours…"
+      ],
+      "Processing — please do not close this page.": [
+        "Traitement en cours — veuillez ne pas fermer cette page."
+      ],
+      "Restore complete.": [
+        "Restauration terminée."
+      ],
+      "Your site has been restored successfully!": [
+        "Votre site a été restauré avec succès !"
+      ],
+      "The migration is complete. Please log back into the WordPress admin to verify everything is working correctly.": [
+        "La migration est terminée. Reconnectez-vous à l'interface d'administration WordPress pour vérifier que tout fonctionne."
+      ],
+      "Log back into WordPress to verify everything is working correctly.": [
+        "Reconnectez-vous à WordPress pour vérifier que tout fonctionne correctement."
+      ],
+      " plugin(s) put on standby for your security": [
+        " extension(s) mise(s) en veille pour votre sécurité"
+      ],
+      "These security or cache plugins have been deactivated because they can block access after migration (WAF firewall, CAPTCHA tied to source domain, etc.). Re-enable them manually after logging back in.": [
+        "Ces extensions de sécurité ou de cache ont été désactivées car elles peuvent bloquer l'accès après migration (pare-feu WAF, CAPTCHA lié au domaine source, etc.). Réactivez-les manuellement après reconnexion."
+      ],
+      "New restore": [
+        "Nouvelle restauration"
+      ],
+      "An error occurred": [
+        "Une erreur est survenue"
+      ],
+      "← Start over": [
+        "← Recommencer"
+      ],
+      "Your backups": [
+        "Vos sauvegardes"
+      ],
+      "Refresh": [
+        "Actualiser"
+      ],
+      "All your archives are listed here. Download them for safekeeping or restore them directly on this site.": [
+        "Toutes vos archives sont listées ici. Téléchargez-les pour les conserver ou restaurez-les directement sur ce site."
+      ],
+      "No backups available. Run an export to create one.": [
+        "Aucune sauvegarde disponible. Lancez une exportation pour en créer une."
+      ],
+      "Permanently delete this backup?": [
+        "Supprimer définitivement cette sauvegarde ?"
+      ],
+      "File": [
+        "Fichier"
+      ],
+      "Size": [
+        "Taille"
+      ],
+      "Date": [
+        "Date"
+      ],
+      "Origin": [
+        "Origine"
+      ],
+      "Actions": [
+        "Actions"
+      ],
+      "Local storage": [
+        "Stockage local"
+      ],
+      "Restore this backup": [
+        "Restaurer cette sauvegarde"
+      ],
+      "Restore": [
+        "Restaurer"
+      ],
+      "Download": [
+        "Télécharger"
+      ],
+      "Delete": [
+        "Supprimer"
+      ],
+      "Failed to load server information.": [
+        "Impossible de charger les informations serveur."
+      ],
+      "Server": [
+        "Serveur"
+      ],
+      "Free disk space": [
+        "Espace libre"
+      ],
+      "Server limits": [
+        "Limites serveur"
+      ],
+      "PHP memory": [
+        "Mémoire PHP"
+      ],
+      "Execution time": [
+        "Temps d'exécution"
+      ],
+      "Chunk size": [
+        "Taille de chunk"
+      ],
+      "Table prefix": [
+        "Préfixe des tables"
+      ],
+      "Table count": [
+        "Nombre de tables"
+      ],
+      "Yes": [
+        "Oui"
+      ],
+      "No": [
+        "Non"
+      ],
+      "PHP Extensions": [
+        "Extensions PHP"
+      ],
+      "Directory permissions": [
+        "Permissions des répertoires"
+      ],
+      "Writable": [
+        "Accessible en écriture"
+      ],
+      "Not writable": [
+        "Non accessible en écriture"
+      ],
+      "WordPress details": [
+        "Détails WordPress"
+      ],
+      "Site URL": [
+        "URL du site"
+      ],
+      "Active theme": [
+        "Thème actif"
+      ],
+      "Active plugins": [
+        "Extensions actives"
+      ],
+      "Permalink structure": [
+        "Structure des permaliens"
+      ],
+      "Default": [
+        "Simple"
+      ],
+      "ABSPATH": [
+        "Chemin ABSPATH"
+      ],
+      "wp-content dir": [
+        "Dossier wp-content"
+      ],
+      "Export": [
+        "Exporter"
+      ],
+      "Backups": [
+        "Sauvegardes"
+      ],
+      "Backup, migration and restore for your WordPress site": [
+        "Sauvegarde, migration et restauration de votre site WordPress"
+      ],
+      "Adaptive upload of ": [
+        "Envoi adaptatif de "
+      ],
+      " MB — initial size: ": [
+        " Mo — taille initiale : "
+      ],
+      " MB sent — ": [
+        " Mo envoyés — "
+      ],
+      "Sending archive directly (": [
+        "Envoi direct de l'archive ("
+      ],
+      "Analysing archive…": [
+        "Analyse de l'archive…"
+      ],
+      "Preparing installer…": [
+        "Préparation de l'installeur…"
+      ],
+      "Installer ready.": [
+        "Installeur prêt."
+      ],
+      "Upload complete": [
+        "Envoi terminé"
+      ],
+      "Archive received successfully.": [
+        "Archive reçue avec succès."
+      ],
+      "Migration completed successfully.": [
+        "Migration terminée avec succès."
+      ],
+      "Plugins put on standby (": [
+        "Plugins mis en veille ("
+      ],
+      "Fatal PHP error detected. ": [
+        "Erreur PHP fatale détectée. "
+      ],
+      "PHP execution time exceeded. ": [
+        "Délai PHP dépassé. "
+      ],
+      "Insufficient memory. ": [
+        "Mémoire insuffisante. "
+      ],
+      "Empty response — server may have timed out. ": [
+        "Réponse vide — le serveur a peut-être expiré. "
+      ],
+      "Analysing backup…": [
+        "Analyse de la sauvegarde…"
+      ],
+      "New backup": [
+        "Nouvelle sauvegarde"
+      ]
+    }
+  }
+}

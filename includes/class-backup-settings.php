@@ -73,9 +73,11 @@ class WPCM_Backup_Settings {
         return $out;
     }
 
-    // ── Simple symmetric encryption for the Nextcloud app-password ───────────
-    // Uses AUTH_KEY + AUTH_SALT from wp-config as the key material.
-    // Not military-grade, but protects against casual DB reads.
+    // ── AES-256-CBC encryption for the Nextcloud app-password ───────────────
+    // Key material: SHA-256( AUTH_KEY + AUTH_SALT ) from wp-config.php.
+    // Requires the PHP openssl extension. The JS UI already enforces this
+    // prerequisite (HAS_OPENSSL flag) so these methods are never called
+    // on servers where openssl is absent — no fallback is provided.
 
     private static function cipher_key(): string {
         return hash( 'sha256', AUTH_KEY . AUTH_SALT . 'wpcm_nc', true );
@@ -83,18 +85,26 @@ class WPCM_Backup_Settings {
 
     public static function encrypt( string $plain ): string {
         if ( ! function_exists( 'openssl_encrypt' ) ) {
-            return base64_encode( $plain ); // graceful degradation
+            // openssl is absent — the UI prevents reaching this path.
+            // Return empty string so the save() call stores nothing.
+            return '';
         }
-        $iv     = openssl_random_pseudo_bytes( 16 );
+        // random_bytes() reads from the OS entropy pool (getrandom/CryptGenRandom) — available since PHP 7.0
+        // (minimum required by this plugin). Replaces openssl_random_pseudo_bytes() whose
+        // $strong parameter could silently be false on some platforms.
+        $iv     = random_bytes( 16 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.rand_random_bytes -- random_bytes() is the correct CSPRNG for PHP 7.0+
         $cipher = openssl_encrypt( $plain, 'AES-256-CBC', self::cipher_key(), OPENSSL_RAW_DATA, $iv );
-        return base64_encode( $iv . $cipher );
+        return base64_encode( $iv . $cipher ); // base64 encodes binary AES output for safe DB storage
     }
 
     public static function decrypt( string $stored ): string {
-        if ( ! function_exists( 'openssl_decrypt' ) ) {
-            return (string) base64_decode( $stored );
+        if ( ! function_exists( 'openssl_decrypt' ) || '' === $stored ) {
+            return '';
         }
-        $raw    = base64_decode( $stored );
+        $raw    = base64_decode( $stored, true ); // strict=true: returns false on invalid base64
+        if ( false === $raw || strlen( $raw ) <= 16 ) {
+            return '';
+        }
         $iv     = substr( $raw, 0, 16 );
         $cipher = substr( $raw, 16 );
         $plain  = openssl_decrypt( $cipher, 'AES-256-CBC', self::cipher_key(), OPENSSL_RAW_DATA, $iv );

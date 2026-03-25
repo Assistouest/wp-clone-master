@@ -38,13 +38,14 @@ class WPCM_Server_Detector {
             'charset'       => $wpdb->charset,
             'collate'       => $wpdb->collate,
             'prefix'        => $wpdb->prefix,
-            'table_count'   => count( $wpdb->get_col( "SHOW TABLES LIKE '{$wpdb->prefix}%'" ) ),
+            'table_count'   => count( $wpdb->get_col( "SHOW TABLES LIKE '{$wpdb->prefix}%'" ) ), // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Server detection query; result must be live
             'total_size'    => $this->get_db_size(),
         ];
     }
 
     private function get_db_size() {
         global $wpdb;
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Server detection query; result must be live, not cached
         $size = $wpdb->get_var(
             $wpdb->prepare(
                 "SELECT SUM(data_length + index_length) FROM information_schema.tables WHERE table_schema = %s AND table_name LIKE %s",
@@ -73,15 +74,15 @@ class WPCM_Server_Detector {
             'permalink'      => get_option( 'permalink_structure' ),
             'site_url'       => site_url(),
             'home_url'       => home_url(),
-            'content_dir'    => WP_CONTENT_DIR,
-            'abspath'        => ABSPATH,
-            'uploads_dir'    => wp_upload_dir()['basedir'],
+            // Absolute server paths intentionally omitted — they are not needed by
+            // the diagnostic UI and exposing them leaks the server directory layout
+            // to any admin-level user (unnecessary attack surface reduction).
             'uploads_size'   => $this->dir_size( wp_upload_dir()['basedir'] ),
         ];
     }
 
     private function server_info() {
-        $server_software = isset( $_SERVER['SERVER_SOFTWARE'] ) ? $_SERVER['SERVER_SOFTWARE'] : 'Unknown';
+        $server_software = sanitize_text_field( wp_unslash( $_SERVER['SERVER_SOFTWARE'] ?? 'Unknown' ) );
         $type = 'unknown';
         if ( stripos( $server_software, 'apache' ) !== false ) $type = 'apache';
         elseif ( stripos( $server_software, 'nginx' ) !== false ) $type = 'nginx';
