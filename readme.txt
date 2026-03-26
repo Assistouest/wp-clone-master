@@ -4,7 +4,7 @@ Tags: clone, backup, migrate, migration, transfer
 Requires at least: 5.6
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.2.0
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -139,11 +139,16 @@ For the general WordPress privacy policy, see https://automattic.com/privacy/.
 * React admin dashboard with real-time progress, activity log, backup management (list, download, restore, delete), server diagnostics, and schedule configuration.
 * Full i18n support: .pot, .po, .mo files and JS JSON translation files for admin and schedule scripts.
 
+= 1.2.0 =
+* New: Introduction of the "Adaptive Database Engine 2.0" specifically designed for massive databases (tested up to 2GB+).
+* New: Real-time feedback loop for database exports: the algorithm now monitors server response time and memory pressure to dynamically adjust batch sizes (from 25 up to 2,000 rows per request).
+* New: Intelligent "Warm-up" phase: the exporter starts with conservative batch sizes and accelerates safely based on server performance.
+* New: MySQL Packet Protection: automatic row-size sampling to prevent "max_allowed_packet" errors on tables with large metadata or longtext columns.
+* Improved: Resilience on shared hosting: advanced transient-based checkpointing to resume exports even after micro-network cuts or proxy timeouts.
+* Improved: Support for high-table-count environments (optimized for 400+ tables).
+* Improved: UI/UX updates in the React dashboard to display real-time adaptive throughput and per-table progress.
+* Fix: Refined memory cleanup (gc_collect_cycles) during heavy export loops to maintain low RAM footprint.
+
 == Screenshots ==
 1. Main dashboard showing real-time export progress and activity log.
 2. Detailed server diagnostics screen showing PHP, MySQL, and WordPress versions along with critical server limits (memory, execution time, and chunk size detection).
-
-== Upgrade Notice ==
-
-= 1.1.0 =
-This release refactors the import architecture for full WP.org PCP compliance. No action required on existing installations — update normally.

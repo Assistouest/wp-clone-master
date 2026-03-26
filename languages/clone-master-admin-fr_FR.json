@@ -324,6 +324,34 @@
       ],
       "New backup": [
         "Nouvelle sauvegarde"
+      ],
+      "Support open-source": [
+        "Soutenir l'open-source"
+      ],
+      "Database: table %1$d/%2$d — exporting %3$s…": [
+        "Base de données : table %1$d/%2$d — export de %3$s…"
+      ],
+      "%d table exported. Scanning files…": [
+        "%d table exportée. Scan des fichiers…",
+        "%d tables exportées. Scan des fichiers…"
+      ],
+      "Current table:": [
+        "Table en cours :"
+      ],
+      "Tables exported": [
+        "Tables exportées"
+      ],
+      "Elapsed time:": [
+        "Temps écoulé :"
+      ],
+      "calls": [
+        "appels"
+      ],
+      "Adaptive batch:": [
+        "Lot adaptatif :"
+      ],
+      "rows/call": [
+        "lignes/appel"
       ]
     }
   }

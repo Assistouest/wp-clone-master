@@ -153,10 +153,52 @@ a { color: var(--c-accent); }
 }
 .wpcm-progress-fill.done::after { display:none; }
 @keyframes wpcm-sh { 0%{transform:translateX(-100%)} 100%{transform:translateX(200%)} }
+
+/* Barre indeterminate — utilisée pendant la phase database (chunked) */
+.wpcm-progress-fill.indeterminate {
+    width:100% !important;
+    transition:none;
+    background:linear-gradient(90deg, var(--c-accent) 0%, #7c3aed 50%, var(--c-accent) 100%);
+    background-size:200% 100%;
+    animation:wpcm-indeterminate 1.6s ease-in-out infinite;
+}
+.wpcm-progress-fill.indeterminate::after { display:none; }
+@keyframes wpcm-indeterminate {
+    0%   { background-position:200% 0; }
+    100% { background-position:-200% 0; }
+}
+
 .wpcm-progress-meta { display:flex; justify-content:space-between; align-items:center; margin-top:7px; gap:12px; }
 .wpcm-progress-msg { font-size:12px; color:var(--c-text-dim); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .wpcm-progress-pct { font-size:12px; font-weight:700; font-family:var(--c-mono); color:var(--c-text-dim); flex-shrink:0; }
 .wpcm-progress-pct.done { color:var(--c-green); }
+
+/* Panneau de détail DB — affiché pendant l'export database chunked */
+.wpcm-db-detail {
+    margin-top:14px; padding:12px 14px;
+    background:var(--c-surface-2); border:1px solid var(--c-border);
+    border-radius:var(--c-r-sm); display:flex; flex-direction:column; gap:8px;
+}
+.wpcm-db-detail-row {
+    display:flex; align-items:center; gap:10px;
+    font-size:12px; color:var(--c-text-mid);
+}
+.wpcm-db-detail-row svg { color:var(--c-accent); flex-shrink:0; }
+.wpcm-db-detail-label { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.wpcm-db-detail-value {
+    font-family:var(--c-mono); font-size:11.5px; font-weight:700;
+    color:var(--c-text); flex-shrink:0;
+}
+/* Mini progress bar pour table individuelle */
+.wpcm-db-table-bar {
+    height:3px; background:var(--c-surface-3); border-radius:99px;
+    overflow:hidden; flex:1;
+}
+.wpcm-db-table-bar-fill {
+    height:100%; border-radius:99px;
+    background:var(--c-accent);
+    transition:width .3s ease;
+}
 
 /* SPINNER */
 .wpcm-spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--c-border-mid); border-top-color:var(--c-accent); border-radius:50%; animation:wpcm-spin .7s linear infinite; flex-shrink:0; }

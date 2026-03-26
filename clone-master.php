@@ -3,7 +3,7 @@
  * Plugin Name: Clone Master
  * Plugin URI: https://github.com/Assistouest/clone-master
  * Description: Clone, migrate and backup your entire WordPress site with intelligent URL replacement and adaptive chunking.
- * Version: 1.1.0
+ * Version: 1.2.0
  * Author: Adrien Piron
  * Author URI: https://profiles.wordpress.org/adrienpiron/
  * License: GPL v3 or later
@@ -18,7 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'WPCM_VERSION', '1.1.0' );
+define( 'WPCM_VERSION', '1.2.0' );
 define( 'WPCM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPCM_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'WPCM_BACKUP_DIR', WP_CONTENT_DIR . '/wpcm-backups/' );

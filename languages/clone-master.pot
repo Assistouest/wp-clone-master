@@ -260,3 +260,45 @@ msgstr ""
 msgid "Cannot create upload session (HTTP %1$s)."
 msgstr ""
 
+
+#. translators: 1: completed table count, 2: total table count, 3: current table name
+#: includes/class-exporter.php
+msgid "Database: table %1$d/%2$d — exporting %3$s…"
+msgstr ""
+
+#. translators: %d = number of tables
+#: includes/class-exporter.php
+msgid "%d table exported. Scanning files…"
+msgid_plural "%d tables exported. Scanning files…"
+msgstr[0] ""
+msgstr[1] ""
+
+#. translators: Label before current table name in export progress panel
+#: admin/js/admin.js
+msgid "Current table:"
+msgstr ""
+
+#. translators: Label for tables-exported progress bar in export panel
+#: admin/js/admin.js
+msgid "Tables exported"
+msgstr ""
+
+#. translators: Label for elapsed time counter in export progress panel
+#: admin/js/admin.js
+msgid "Elapsed time:"
+msgstr ""
+
+#. translators: Unit after a number: "42 calls"
+#: admin/js/admin.js
+msgid "calls"
+msgstr ""
+
+#. translators: Label for adaptive batch size in export progress panel
+#: admin/js/admin.js
+msgid "Adaptive batch:"
+msgstr ""
+
+#. translators: Unit after a number: "500 rows/call"
+#: admin/js/admin.js
+msgid "rows/call"
+msgstr ""

@@ -154,55 +154,292 @@ class WPCM_Exporter {
     }
 
     // =========================================================================
-    // Step 2: Export database
+    // Step 2: Export database — chunked + ADAPTIVE throttle
+    //
+    // ARCHITECTURE
+    // ─────────────────────────────────────────────────────────────────────────
+    // Each AJAX call processes exactly `rows_per_call` rows, then returns
+    // next_step=>'database' so the JS loop fires immediately. A cursor stored
+    // in a transient carries table_idx, offset, rows_per_call, and timing data
+    // across calls.
+    //
+    // ADAPTIVE THROTTLE (3 independent feedback loops per call)
+    // ─────────────────────────────────────────────────────────────────────────
+    // 1. TIME LOOP   — measures wall-clock duration of the previous call.
+    //                  • t > budget×1.0  → ÷1.5  (too slow, risk of timeout)
+    //                  • t < budget×0.5  → ×1.3  (spare capacity, go faster)
+    //                  Target budget = min(max_execution_time × 0.55, 20s, 25s)
+    //                  Falls back to 12s when max_execution_time = 0 (no limit).
+    //
+    // 2. MEMORY LOOP — checks memory_get_peak_usage() after each call.
+    //                  • peak > memory_limit × 0.70 → ÷2  (pressure)
+    //                  • peak < memory_limit × 0.35 → ×1.2 (headroom)
+    //
+    // 3. ROW-SIZE PROBE — on the very first call for each table, samples 10
+    //                  rows to estimate avg bytes/row (post-escaping). Used to
+    //                  upper-bound rows_per_call so a single INSERT batch never
+    //                  approaches max_allowed_packet (capped at 90% of it).
+    //
+    // CLAMP: rows_per_call is always kept in [ROWS_MIN, ROWS_MAX].
+    //
+    // IMPORT COMPATIBILITY
+    // ─────────────────────────────────────────────────────────────────────────
+    // Output format is identical to the previous fixed-chunk version:
+    // one .sql file per table, same INSERT IGNORE syntax, same header/footer.
+    // The standalone installer.php is completely unaffected.
     // =========================================================================
+
+    /** Hard lower bound — prevents infinite loops on near-empty tables. */
+    const WPCM_DB_ROWS_MIN = 25;
+
+    /** Hard upper bound — safeguard against max_allowed_packet overflows. */
+    const WPCM_DB_ROWS_MAX = 2000;
+
+    /** Starting value before the first timing measurement is available. */
+    const WPCM_DB_ROWS_INITIAL = 200;
+
+    /** Rows per INSERT INTO … VALUES (…),(…),… statement (unchanged). */
+    const WPCM_DB_INSERT_CHUNK = 100;
+
+    // ── Adaptive throttle helpers ─────────────────────────────────────────────
+
+    /**
+     * Compute the time budget (seconds) for one AJAX call on this server.
+     *
+     * We target 55% of max_execution_time so the call finishes well before
+     * PHP's hard limit. Apache/nginx proxy timeouts (typically 30-60 s) are
+     * an additional ceiling, so we cap at 20 s regardless.
+     * When max_execution_time = 0 (unlimited — rare on shared hosting, common
+     * on CLI/VPS), we default to 12 s as a conservative baseline.
+     *
+     * @return float Target seconds per AJAX call.
+     */
+    private function db_time_budget() {
+        $max = (int) ini_get( 'max_execution_time' );
+        if ( $max <= 0 ) return 12.0;          // unlimited → conservative default
+        return min( $max * 0.55, 20.0 );
+    }
+
+    /**
+     * Probe avg bytes-per-row for a table by sampling up to 10 rows.
+     * Returns 0 when the table is empty (caller must guard against division).
+     *
+     * @param string $safe_table Escaped table name (via esc_sql).
+     * @return int Estimated average row size in bytes, post-escaping overhead.
+     */
+    private function db_probe_row_size( $safe_table ) {
+        global $wpdb;
+        $sample = $wpdb->get_results( // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- sampling; escaped via esc_sql()
+            "SELECT * FROM `{$safe_table}` LIMIT 10",
+            ARRAY_A
+        );
+        if ( ! $sample ) return 0;
+        $total = 0;
+        foreach ( $sample as $row ) {
+            // Rough estimate of INSERT text size: key names + values + overhead
+            $total += array_sum( array_map( 'strlen', array_keys( $row ) ) )
+                    + array_sum( array_map( function( $v ) { return $v === null ? 4 : strlen( (string) $v ) * 2 + 3; }, $row ) )
+                    + 30; // per-value punctuation overhead
+        }
+        return (int) ( $total / count( $sample ) );
+    }
+
+    /**
+     * Compute max_allowed_packet from MySQL (bytes).
+     * Returns a safe fallback of 1 MB when the query fails.
+     *
+     * @return int max_allowed_packet in bytes.
+     */
+    private function db_max_allowed_packet() {
+        global $wpdb;
+        $val = $wpdb->get_var( "SELECT @@max_allowed_packet" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- live server variable, caching would miss runtime changes
+        return $val ? (int) $val : 1 * 1024 * 1024;
+    }
+
+    /**
+     * Apply the three adaptive-throttle feedback loops and return the new
+     * rows_per_call value (clamped to [ROWS_MIN, ROWS_MAX]).
+     *
+     * @param int   $rows_per_call   Current value.
+     * @param float $t_real          Measured duration of the previous call (seconds).
+     * @param int   $mem_peak        Peak memory usage of the previous call (bytes).
+     * @param int   $avg_row_bytes   Estimated row size from the probe (bytes; 0 = unknown).
+     * @param int   $max_packet      MySQL max_allowed_packet (bytes).
+     * @return int Adjusted rows_per_call.
+     */
+    private function db_adapt_rows( $rows_per_call, $t_real, $mem_peak, $avg_row_bytes, $max_packet ) {
+        $budget = $this->db_time_budget();
+
+        // ── Loop 1: TIME ─────────────────────────────────────────────────────
+        if ( $t_real > $budget ) {
+            $rows_per_call = (int) ( $rows_per_call / 1.5 );
+        } elseif ( $t_real < $budget * 0.5 ) {
+            $rows_per_call = (int) ( $rows_per_call * 1.3 );
+        }
+
+        // ── Loop 2: MEMORY ───────────────────────────────────────────────────
+        $mem_limit = $this->return_bytes_local( ini_get( 'memory_limit' ) );
+        if ( $mem_limit > 0 ) {
+            if ( $mem_peak > $mem_limit * 0.70 ) {
+                $rows_per_call = (int) ( $rows_per_call / 2 );
+            } elseif ( $mem_peak < $mem_limit * 0.35 && $t_real < $budget * 0.5 ) {
+                // Only grow on memory headroom when time also has room.
+                $rows_per_call = (int) ( $rows_per_call * 1.2 );
+            }
+        }
+
+        // ── Loop 3: ROW-SIZE vs max_allowed_packet ────────────────────────────
+        // Ensure one INSERT batch (INSERT_CHUNK rows) never exceeds 90% of max_packet.
+        if ( $avg_row_bytes > 0 && $max_packet > 0 ) {
+            $packet_cap = (int) ( ( $max_packet * 0.90 ) / $avg_row_bytes );
+            if ( $packet_cap < $rows_per_call ) {
+                $rows_per_call = $packet_cap;
+            }
+        }
+
+        // ── Clamp ─────────────────────────────────────────────────────────────
+        return max( self::WPCM_DB_ROWS_MIN, min( self::WPCM_DB_ROWS_MAX, $rows_per_call ) );
+    }
+
+    /**
+     * Tiny local byte-string parser (mirrors WPCM_Server_Detector::return_bytes).
+     * Avoids instantiating the detector just to parse memory_limit.
+     *
+     * @param string $val PHP ini string e.g. "256M", "1G", "-1".
+     * @return int Bytes, or 0 for "-1" (unlimited).
+     */
+    private function return_bytes_local( $val ) {
+        $val  = trim( (string) $val );
+        $last = strtolower( $val[ strlen( $val ) - 1 ] ?? '' );
+        $int  = (int) $val;
+        if ( $int < 0 ) return 0; // -1 = unlimited → treat as "no limit"
+        switch ( $last ) {
+            case 'g': $int *= 1024; // fall through
+            case 'm': $int *= 1024; // fall through
+            case 'k': $int *= 1024;
+        }
+        return $int;
+    }
+
+    // ── Main step ─────────────────────────────────────────────────────────────
+
     private function step_database() {
         global $wpdb;
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Full export requires live table list; caching would miss recently created tables
-        $tables = $wpdb->get_col(
-            $wpdb->prepare( "SHOW TABLES LIKE %s", $wpdb->esc_like( $wpdb->prefix ) . '%' )
-        );
-        $sql_dir = $this->session_dir . 'sql/';
-        $table_info = [];
+        $sql_dir    = $this->session_dir . 'sql/';
+        $cursor_key = 'wpcm_db_cursor_' . $this->session_id;
 
-        $header  = "-- Clone Master Database Export\n";
-        $header .= "-- Date: " . gmdate( 'Y-m-d H:i:s' ) . " UTC\n";
-        $header .= "-- Site: " . site_url() . "\n";
-        $header .= "-- Prefix: {$wpdb->prefix}\n";
-        $header .= "-- MySQL: " . $wpdb->db_version() . "\n";
-        $header .= "SET SQL_MODE = \"NO_AUTO_VALUE_ON_ZERO\";\n";
-        $header .= "SET NAMES utf8mb4;\n";
-        $header .= "SET FOREIGN_KEY_CHECKS = 0;\n\n";
-        file_put_contents( $sql_dir . '00_header.sql', $header, LOCK_EX );
+        // ── Restore or initialise the cursor ──────────────────────────────────
+        $state = get_transient( $cursor_key );
 
-        foreach ( $tables as $idx => $table ) {
-            $filename  = sprintf( '%02d_%s.sql', $idx + 1, $table );
-            $filepath  = $sql_dir . $filename;
-            $sql       = '';
+        if ( ! $state ) {
+            // First call: build table list, write SQL header, init adaptive state.
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Full export requires live table list; caching would miss recently created tables
+            $tables = $wpdb->get_col(
+                $wpdb->prepare( "SHOW TABLES LIKE %s", $wpdb->esc_like( $wpdb->prefix ) . '%' )
+            );
 
-            // Use real table names — prefix replacement happens at import time.
-            $safe_table = esc_sql( $table );
+            $header  = "-- Clone Master Database Export\n";
+            $header .= "-- Date: " . gmdate( 'Y-m-d H:i:s' ) . " UTC\n";
+            $header .= "-- Site: " . site_url() . "\n";
+            $header .= "-- Prefix: {$wpdb->prefix}\n";
+            $header .= "-- MySQL: " . $wpdb->db_version() . "\n";
+            $header .= "SET SQL_MODE = \"NO_AUTO_VALUE_ON_ZERO\";\n";
+            $header .= "SET NAMES utf8mb4;\n";
+            $header .= "SET FOREIGN_KEY_CHECKS = 0;\n\n";
+            file_put_contents( $sql_dir . '00_header.sql', $header, LOCK_EX );
+
+            $state = [
+                'tables'         => $tables,
+                'table_idx'      => 0,
+                'offset'         => 0,
+                'current_count'  => 0,
+                'table_info'     => [],
+                // Adaptive throttle state
+                'rows_per_call'  => self::WPCM_DB_ROWS_INITIAL,
+                't_prev'         => 0.0,   // duration of previous call (seconds)
+                'mem_prev'       => 0,     // peak memory of previous call (bytes)
+                'avg_row_bytes'  => 0,     // estimated row size for current table
+                'max_packet'     => 0,     // MySQL max_allowed_packet (fetched once)
+            ];
+        }
+
+        // ── Unpack cursor ─────────────────────────────────────────────────────
+        $tables        = $state['tables'];
+        $table_idx     = (int)   $state['table_idx'];
+        $offset        = (int)   $state['offset'];
+        $table_info    = $state['table_info'];
+        $total_tables  = count( $tables );
+        $rows_per_call = (int)   $state['rows_per_call'];
+        $t_prev        = (float) $state['t_prev'];
+        $mem_prev      = (int)   $state['mem_prev'];
+        $avg_row_bytes = (int)   $state['avg_row_bytes'];
+        $max_packet    = (int)   $state['max_packet'];
+
+        // ── Fetch max_allowed_packet once per session ─────────────────────────
+        if ( $max_packet === 0 ) {
+            $max_packet = $this->db_max_allowed_packet();
+        }
+
+        // ── Apply adaptive throttle from previous call's measurements ─────────
+        if ( $t_prev > 0 ) {
+            $rows_per_call = $this->db_adapt_rows(
+                $rows_per_call, $t_prev, $mem_prev, $avg_row_bytes, $max_packet
+            );
+        }
+
+        // ── All tables done? Finalise immediately. ─────────────────────────────
+        if ( $table_idx >= $total_tables ) {
+            delete_transient( $cursor_key );
+            return $this->finish_database_step( $table_info, $sql_dir, $total_tables );
+        }
+
+        // ── Process current table ─────────────────────────────────────────────
+        $table      = $tables[ $table_idx ];
+        $safe_table = esc_sql( $table );
+        $filename   = sprintf( '%02d_%s.sql', $table_idx + 1, $table );
+        $filepath   = $sql_dir . $filename;
+
+        // On first visit to this table: write CREATE TABLE DDL, count rows,
+        // and run the row-size probe so Loop 3 can cap rows_per_call correctly.
+        if ( $offset === 0 ) {
             $create = $wpdb->get_row( "SHOW CREATE TABLE `{$safe_table}`", ARRAY_N ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- table name from SHOW TABLES, escaped via esc_sql()
+            $ddl    = '';
             if ( $create ) {
-                $sql .= "DROP TABLE IF EXISTS `{$table}`;\n";
-                $sql .= $create[1] . ";\n\n";
+                $ddl .= "DROP TABLE IF EXISTS `{$table}`;\n";
+                $ddl .= $create[1] . ";\n\n";
             }
+            file_put_contents( $filepath, $ddl, LOCK_EX );
 
-            $count  = (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$safe_table}`" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- table name from SHOW TABLES, escaped via esc_sql()
-            // Use multi-row INSERTs (100 rows per statement) — like mysqldump default.
-            // This reduces query count from N to N/100, dramatically faster on import.
-            $batch       = 100;
-            $offset      = 0;
-            $insert_rows = 100; // rows per INSERT INTO ... VALUES (...),(...),...
+            $count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$safe_table}`" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- table name from SHOW TABLES, escaped via esc_sql()
+            $state['current_count'] = $count;
 
-            while ( $offset < $count ) {
-                $rows = $wpdb->get_results( "SELECT * FROM `{$safe_table}` LIMIT {$offset}, {$batch}", ARRAY_A ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- table name from SHOW TABLES, escaped via esc_sql()
-                if ( ! $rows ) break;
+            // Row-size probe: sample up to 10 rows and re-apply Loop 3 cap now.
+            $avg_row_bytes = $this->db_probe_row_size( $safe_table );
+            if ( $avg_row_bytes > 0 && $max_packet > 0 ) {
+                $packet_cap    = (int) ( ( $max_packet * 0.90 ) / $avg_row_bytes );
+                $rows_per_call = max( self::WPCM_DB_ROWS_MIN, min( $rows_per_call, $packet_cap, self::WPCM_DB_ROWS_MAX ) );
+            }
+        } else {
+            $count = (int) $state['current_count'];
+        }
 
-                $cols        = array_map( function( $c ) { return "`{$c}`"; }, array_keys( $rows[0] ) );
-                $cols_str    = implode( ',', $cols );
-                $row_values  = [];
+        // ── Start timing this call ─────────────────────────────────────────────
+        $t_start  = microtime( true );
+        $mem_before = memory_get_peak_usage( true );
+
+        // ── Fetch and write rows ──────────────────────────────────────────────
+        if ( $count > 0 ) {
+            $rows = $wpdb->get_results( // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- table name from SHOW TABLES, escaped via esc_sql()
+                "SELECT * FROM `{$safe_table}` LIMIT {$offset}, {$rows_per_call}",
+                ARRAY_A
+            );
+
+            if ( $rows ) {
+                $cols       = array_map( function( $c ) { return "`{$c}`"; }, array_keys( $rows[0] ) );
+                $cols_str   = implode( ',', $cols );
+                $sql        = '';
+                $row_values = [];
 
                 foreach ( $rows as $row ) {
                     $values = array_map( function( $v ) use ( $wpdb ) {
@@ -234,12 +471,6 @@ class WPCM_Exporter {
                          * handles backslash-escaping of quotes, backslashes, and NUL
                          * bytes, which we need for a valid SQL file.
                          *
-                         * Alternatives that are NOT wp.org-compatible:
-                         *   - $wpdb->dbh->real_escape_string() — accesses a private
-                         *     wpdb property; rejected by Plugin Review Team.
-                         *   - mysqli_real_escape_string()       — raw mysqli, no WP layer.
-                         *   - addslashes()                      — forbidden by WP coding standards.
-                         *
                          * phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
                          * -- value is escaped via esc_sql(); placeholder removed before
                          *    file write, not before a wpdb query. This is the correct
@@ -249,37 +480,90 @@ class WPCM_Exporter {
                     }, array_values( $row ) );
                     $row_values[] = '(' . implode( ',', $values ) . ')';
 
-                    // Flush every $insert_rows rows to keep statement size manageable
-                    if ( count( $row_values ) >= $insert_rows ) {
+                    if ( count( $row_values ) >= self::WPCM_DB_INSERT_CHUNK ) {
                         $sql .= "INSERT IGNORE INTO `{$safe_table}` ({$cols_str}) VALUES\n  "
                               . implode( ",\n  ", $row_values ) . ";\n";
                         $row_values = [];
                     }
                 }
-                // Flush remaining rows
                 if ( ! empty( $row_values ) ) {
                     $sql .= "INSERT IGNORE INTO `{$safe_table}` ({$cols_str}) VALUES\n  "
                           . implode( ",\n  ", $row_values ) . ";\n";
                 }
 
-                $offset += $batch;
-
-                // Write to disk every 2MB to avoid memory spikes
-                if ( strlen( $sql ) > 2 * 1024 * 1024 ) {
-                    file_put_contents( $filepath, $sql, FILE_APPEND | LOCK_EX );
-                    $sql = '';
-                }
+                file_put_contents( $filepath, $sql, FILE_APPEND | LOCK_EX );
             }
+        }
 
-            file_put_contents( $filepath, $sql, FILE_APPEND | LOCK_EX );
+        // ── Measure this call ─────────────────────────────────────────────────
+        $t_real   = microtime( true ) - $t_start;
+        $mem_peak = max( 0, memory_get_peak_usage( true ) - $mem_before );
 
+        $offset += $rows_per_call;
+
+        // ── Table finished? Advance to the next one. ──────────────────────────
+        if ( $offset >= $count ) {
             $table_info[] = [
                 'name' => $table,
                 'rows' => $count,
                 'file' => $filename,
             ];
+            $table_idx++;
+            $offset        = 0;
+            $avg_row_bytes = 0; // Will be re-probed on next table's first call.
+            unset( $state['current_count'] );
         }
 
+        // ── Persist cursor with updated adaptive state ────────────────────────
+        $state['table_idx']     = $table_idx;
+        $state['offset']        = $offset;
+        $state['table_info']    = $table_info;
+        $state['rows_per_call'] = $rows_per_call;
+        $state['t_prev']        = round( $t_real, 4 );
+        $state['mem_prev']      = $mem_peak;
+        $state['avg_row_bytes'] = $avg_row_bytes;
+        $state['max_packet']    = $max_packet;
+
+        // Check again: did we just finish the last table?
+        if ( $table_idx >= $total_tables ) {
+            delete_transient( $cursor_key );
+            return $this->finish_database_step( $table_info, $sql_dir, $total_tables );
+        }
+
+        // Transient TTL: 2 hours — enough for any realistic export.
+        set_transient( $cursor_key, $state, 2 * HOUR_IN_SECONDS );
+
+        // Progress: database export occupies 10 %→25 % of the total bar.
+        $db_progress         = $total_tables > 0 ? (int) ( 15 * $table_idx / $total_tables ) : 15;
+        $current_table_label = $tables[ $table_idx ] ?? '';
+
+        return [
+            'session_id'   => $this->session_id,
+            'next_step'    => 'database',
+            'progress'     => 10 + $db_progress,
+            'rows_per_call' => $rows_per_call,  // exposed for the UI detail panel
+            /* translators: 1: completed table count, 2: total table count, 3: current table name */
+            'message'      => sprintf(
+                __( 'Database: table %1$d/%2$d — exporting %3$s…', 'clone-master' ),
+                $table_idx,
+                $total_tables,
+                $current_table_label
+            ),
+        ];
+    }
+
+    /**
+     * Finalise the database export step: write the SQL footer, update the
+     * manifest, and hand off to the files_scan step.
+     *
+     * Called by step_database() when all tables have been processed.
+     *
+     * @param array  $table_info Accumulated table metadata.
+     * @param string $sql_dir    Path to the sql/ subdirectory.
+     * @param int    $total      Total number of tables exported.
+     * @return array Next-step payload for the AJAX response.
+     */
+    private function finish_database_step( $table_info, $sql_dir, $total ) {
         file_put_contents( $sql_dir . '99_footer.sql', "\nSET FOREIGN_KEY_CHECKS = 1;\n", LOCK_EX );
 
         $this->manifest['tables']       = $table_info;
@@ -288,10 +572,11 @@ class WPCM_Exporter {
 
         return [
             'session_id'   => $this->session_id,
-            'tables_count' => count( $tables ),
+            'tables_count' => $total,
             'next_step'    => 'files_scan',
             'progress'     => 25,
-            'message'      => count( $tables ) . /* translators: %d = number of tables */ ' ' . __( 'tables exported. Scanning files...', 'clone-master' ),
+            /* translators: %d = number of tables */
+            'message'      => sprintf( _n( '%d table exported. Scanning files…', '%d tables exported. Scanning files…', $total, 'clone-master' ), $total ),
         ];
     }
 

@@ -108,6 +108,7 @@
             info:     ['circle|cx=12|cy=12|r=10', 'line|x1=12|y1=8|x2=12|y2=12', 'line|x1=12|y1=16|x2=12.01|y2=16'],
             restore:  ['polyline|points=1 4 1 10 7 10', 'path|d=M3.51 15a9 9 0 102.13-9.36L1 10'],
             coffee:   ['path|d=M18 8h1a4 4 0 010 8h-1', 'path|d=M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z', 'line|x1=6|y1=1|x2=6|y2=4', 'line|x1=10|y1=1|x2=10|y2=4', 'line|x1=14|y1=1|x2=14|y2=4'],
+            clock:    ['circle|cx=12|cy=12|r=10', 'polyline|points=12 6 12 12 16 14'],
         };
         const elems = (paths[n] || []).map((spec, i) => {
             const parts = spec.split('|');
@@ -161,6 +162,63 @@
     /* =========================================================
        ONGLET EXPORT
        ========================================================= */
+    /* =========================================================
+       DbPhaseDetail — panneau affiché pendant l'export chunked
+       ========================================================= */
+    function DbPhaseDetail({ dbInfo }) {
+        if (!dbInfo) return null;
+        const { tableIdx, totalTables, tableName, elapsedSec, calls, rowsPerCall } = dbInfo;
+        const pct = totalTables > 0 ? Math.round(100 * tableIdx / totalTables) : 0;
+        const mins = Math.floor(elapsedSec / 60);
+        const secs = elapsedSec % 60;
+        const elapsed = mins > 0
+            ? mins + 'min ' + secs + 's'
+            : secs + 's';
+
+        return h('div', { className: 'wpcm-db-detail' },
+            // Ligne 1 : table courante
+            h('div', { className: 'wpcm-db-detail-row' },
+                h(Ico, { n: 'db', s: 13 }),
+                h('span', { className: 'wpcm-db-detail-label' },
+                    __( 'Current table:', 'clone-master' ), ' ',
+                    h('strong', null, tableName || '…')
+                ),
+                h('span', { className: 'wpcm-db-detail-value' },
+                    tableIdx, ' / ', totalTables
+                )
+            ),
+            // Row 2: per-table progress bar
+            h('div', { className: 'wpcm-db-detail-row', style: { gap: '8px' } },
+                h('span', { style: { fontSize: '11px', color: 'var(--c-text-dim)', flexShrink: 0, width: '100px' } },
+                    __( 'Tables exported', 'clone-master' )
+                ),
+                h('div', { className: 'wpcm-db-table-bar' },
+                    h('div', { className: 'wpcm-db-table-bar-fill', style: { width: pct + '%' } })
+                ),
+                h('span', { className: 'wpcm-db-detail-value' }, pct + '%')
+            ),
+            // Row 3: elapsed time / call counter
+            h('div', { className: 'wpcm-db-detail-row' },
+                h(Ico, { n: 'clock', s: 13 }),
+                h('span', { className: 'wpcm-db-detail-label' },
+                    __( 'Elapsed time:', 'clone-master' ), ' ',
+                    h('strong', null, elapsed)
+                ),
+                h('span', { className: 'wpcm-db-detail-value', style: { color: 'var(--c-text-dim)' } },
+                    calls, ' ', __( 'calls', 'clone-master' )
+                )
+            ),
+            // Row 4: adaptive batch size
+            rowsPerCall && h('div', { className: 'wpcm-db-detail-row' },
+                h(Ico, { n: 'layers', s: 13 }),
+                h('span', { className: 'wpcm-db-detail-label' },
+                    __( 'Adaptive batch:', 'clone-master' ), ' ',
+                    h('strong', null, rowsPerCall + ' ' + __( 'rows/call', 'clone-master' ))
+                )
+            )
+        );
+    }
+
     function ExportTab() {
         const [running, setRunning] = useState(false);
         const [progress, setProgress] = useState(0);
@@ -169,27 +227,81 @@
         const [result, setResult] = useState(null);
         const [logs, setLogs] = useState([]);
         const [error, setError] = useState(null);
+        // Détail de la phase database chunked
+        const [dbInfo, setDbInfo] = useState(null);
+        const startTimeRef = useRef(null);
+        const dbCallsRef = useRef(0);
 
         const log = useCallback((msg, type = '') => {
             setLogs(p => [...p, { time: new Date().toLocaleTimeString(), msg, type }]);
         }, []);
 
+        // Extrait les infos de progression DB depuis le message serveur
+        // Format: "Database: table 3/12 — exporting wp_posts…"
+        const parseDbMessage = useCallback((msg) => {
+            if (!msg) return null;
+            // Tente le format i18n FR et EN
+            const m = msg.match(/(\d+)\/(\d+)[^a-zA-Z_]*([a-zA-Z0-9_]+[^\s…]*)/);
+            if (!m) return null;
+            return { tableIdx: parseInt(m[1], 10), totalTables: parseInt(m[2], 10), tableName: m[3] };
+        }, []);
+
         const run = async () => {
-            setRunning(true); setProgress(0); setDone(false); setResult(null); setError(null); setLogs([]);
+            setRunning(true); setProgress(0); setDone(false); setResult(null);
+            setError(null); setLogs([]); setDbInfo(null);
+            startTimeRef.current = Date.now();
+            dbCallsRef.current = 0;
             let sid = '', next = 'init';
+            let inDbPhase = false;
             try {
                 while (next) {
                     const d = await apiRetry('wpcm_export', { step: next, session_id: sid }, MAX_RETRIES, log);
                     sid = d.session_id || sid;
-                    setProgress(d.progress || 0); setMessage(d.message || '');
-                    log(d.message || next + ' done', 'success');
+                    setProgress(d.progress || 0);
+                    setMessage(d.message || '');
+
+                    // Phase database chunked : mise à jour silencieuse du panneau
+                    if (next === 'database' && d.next_step === 'database') {
+                        inDbPhase = true;
+                        dbCallsRef.current++;
+                        const parsed = parseDbMessage(d.message);
+                        const elapsed = Math.round((Date.now() - startTimeRef.current) / 1000);
+                        if (parsed) {
+                            setDbInfo({ ...parsed, elapsedSec: elapsed, calls: dbCallsRef.current, rowsPerCall: d.rows_per_call || null });
+                        }
+                        // Ne pas spammer le log — mise à jour de la dernière entrée DB
+                        setLogs(prev => {
+                            const last = prev[prev.length - 1];
+                            const isDbEntry = last && last.isDb;
+                            const entry = { time: new Date().toLocaleTimeString(), msg: d.message || '', type: '', isDb: true };
+                            return isDbEntry ? [...prev.slice(0, -1), entry] : [...prev, entry];
+                        });
+                    } else {
+                        // Phase terminée ou autre step : log normal
+                        if (inDbPhase && next === 'database') {
+                            // Dernier appel database → files_scan
+                            inDbPhase = false;
+                            setDbInfo(null);
+                            log(d.message || 'database done', 'success');
+                        } else {
+                            log(d.message || next + ' done', 'success');
+                        }
+                    }
+
                     if (d.download_url) setResult(d);
                     next = d.next_step || null;
                 }
-                setDone(true); log(__( 'Backup created successfully.', 'clone-master' ), 'success');
-            } catch (e) { setError(e.message); log( __( 'Error: ', 'clone-master' ) + e.message, 'error'); }
-            finally { setRunning(false); }
+                setDone(true); setDbInfo(null);
+                log(__( 'Backup created successfully.', 'clone-master' ), 'success');
+            } catch (e) {
+                setError(e.message);
+                setDbInfo(null);
+                log(__( 'Error: ', 'clone-master' ) + e.message, 'error');
+            } finally { setRunning(false); }
         };
+
+        // Phase DB active = barre indeterminate
+        const isDbPhase = running && dbInfo !== null;
 
         return h(Fragment, null,
             h('div', { className: 'wpcm-intro' },
@@ -208,8 +320,23 @@
                 ),
 
                 running && h(Fragment, null,
-                    h(ProgressBar, { progress, message }),
-                    h('div', { className: 'wpcm-running-row' },
+                    // Barre principale : indeterminate pendant DB, normale sinon
+                    h('div', { className: 'wpcm-progress-wrap' },
+                        h('div', { className: 'wpcm-progress-track' },
+                            h('div', {
+                                className: 'wpcm-progress-fill' + (isDbPhase ? ' indeterminate' : ''),
+                                style: isDbPhase ? {} : { width: Math.min(progress, 100) + '%' }
+                            })
+                        ),
+                        h('div', { className: 'wpcm-progress-meta' },
+                            h('span', { className: 'wpcm-progress-msg' }, message || ''),
+                            !isDbPhase && h('span', { className: 'wpcm-progress-pct' }, Math.round(progress) + ' %')
+                        )
+                    ),
+                    // Panneau détail DB
+                    h(DbPhaseDetail, { dbInfo }),
+                    // Ligne spinner
+                    !isDbPhase && h('div', { className: 'wpcm-running-row' },
                         h('span', { className: 'wpcm-spinner' }),
                         __( 'Processing, please wait…', 'clone-master' )
                     )
