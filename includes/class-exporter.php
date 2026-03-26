@@ -329,11 +329,34 @@ class WPCM_Exporter {
         $sql_dir    = $this->session_dir . 'sql/';
         $cursor_key = 'wpcm_db_cursor_' . $this->session_id;
 
-        // ── Restore or initialise the cursor ──────────────────────────────────
-        $state = get_transient( $cursor_key );
+        // ═══════════════════════════════════════════════════════════════════════
+        // ARCHITECTURE DU CURSEUR — pourquoi deux fichiers + un transient léger
+        // ═══════════════════════════════════════════════════════════════════════
+        // Sur les hébergements mutualisés (Hostinger, o2switch, etc.) la table
+        // wp_options a une limite de taille par ligne (~1 MB sur certains hosts).
+        // Un transient qui grossit (liste de 129 tables + table_info accumulée)
+        // dépasse cette limite silencieusement : set_transient() retourne false,
+        // le curseur n'est pas persisté, et le prochain appel repart de zéro →
+        // boucle infinie observée (2 360 appels sur wp_aa_daily vide).
+        //
+        // Solution adoptée par les plugins pro (UpdraftPlus, Duplicator, AIOSEO) :
+        //  • db_cursor.json  — scalaires légers (idx, offset, throttle)
+        //  • db_tables.json  — liste des tables (écrit une seule fois)
+        //  • db_info.json    — table_info accumulée (remplace $state['table_info'])
+        // Ces fichiers vivent dans le répertoire de session, déjà protégé par
+        // .htaccess. Le transient est supprimé complètement.
+        // ═══════════════════════════════════════════════════════════════════════
 
-        if ( ! $state ) {
-            // First call: build table list, write SQL header, init adaptive state.
+        $cursor_file = $this->session_dir . 'db_cursor.json';
+        $tables_file = $this->session_dir . 'db_tables.json';
+        $info_file   = $this->session_dir . 'db_info.json';
+
+        $cursor = file_exists( $cursor_file )
+            ? json_decode( file_get_contents( $cursor_file ), true )
+            : null;
+
+        if ( ! $cursor ) {
+            // First call: build table list, write SQL header, init cursor.
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Full export requires live table list; caching would miss recently created tables
             $tables = $wpdb->get_col(
                 $wpdb->prepare( "SHOW TABLES LIKE %s", $wpdb->esc_like( $wpdb->prefix ) . '%' )
@@ -349,32 +372,37 @@ class WPCM_Exporter {
             $header .= "SET FOREIGN_KEY_CHECKS = 0;\n\n";
             file_put_contents( $sql_dir . '00_header.sql', $header, LOCK_EX );
 
-            $state = [
-                'tables'         => $tables,
+            // Persist the table list separately (can be large with many tables).
+            file_put_contents( $tables_file, wp_json_encode( $tables ), LOCK_EX );
+            file_put_contents( $info_file,   wp_json_encode( [] ),      LOCK_EX );
+
+            $cursor = [
                 'table_idx'      => 0,
                 'offset'         => 0,
                 'current_count'  => 0,
-                'table_info'     => [],
                 // Adaptive throttle state
                 'rows_per_call'  => self::WPCM_DB_ROWS_INITIAL,
-                't_prev'         => 0.0,   // duration of previous call (seconds)
-                'mem_prev'       => 0,     // peak memory of previous call (bytes)
-                'avg_row_bytes'  => 0,     // estimated row size for current table
-                'max_packet'     => 0,     // MySQL max_allowed_packet (fetched once)
+                't_prev'         => 0.0,
+                'mem_prev'       => 0,
+                'avg_row_bytes'  => 0,
+                'max_packet'     => 0,
             ];
         }
 
         // ── Unpack cursor ─────────────────────────────────────────────────────
-        $tables        = $state['tables'];
-        $table_idx     = (int)   $state['table_idx'];
-        $offset        = (int)   $state['offset'];
-        $table_info    = $state['table_info'];
+        $tables        = json_decode( file_get_contents( $tables_file ), true ) ?: [];
+        $table_info    = json_decode( file_get_contents( $info_file ),   true ) ?: [];
+        $table_idx     = (int)   $cursor['table_idx'];
+        $offset        = (int)   $cursor['offset'];
         $total_tables  = count( $tables );
-        $rows_per_call = (int)   $state['rows_per_call'];
-        $t_prev        = (float) $state['t_prev'];
-        $mem_prev      = (int)   $state['mem_prev'];
-        $avg_row_bytes = (int)   $state['avg_row_bytes'];
-        $max_packet    = (int)   $state['max_packet'];
+        $rows_per_call = (int)   $cursor['rows_per_call'];
+        $t_prev        = (float) $cursor['t_prev'];
+        $mem_prev      = (int)   $cursor['mem_prev'];
+        $avg_row_bytes = (int)   $cursor['avg_row_bytes'];
+        $max_packet    = (int)   $cursor['max_packet'];
+
+        // Compat : ancien champ $state → $cursor (migration transparente)
+        $state = &$cursor;
 
         // ── Fetch max_allowed_packet once per session ─────────────────────────
         if ( $max_packet === 0 ) {
@@ -390,7 +418,7 @@ class WPCM_Exporter {
 
         // ── All tables done? Finalise immediately. ─────────────────────────────
         if ( $table_idx >= $total_tables ) {
-            delete_transient( $cursor_key );
+            @unlink( $cursor_file );
             return $this->finish_database_step( $table_info, $sql_dir, $total_tables );
         }
 
@@ -412,7 +440,7 @@ class WPCM_Exporter {
             file_put_contents( $filepath, $ddl, LOCK_EX );
 
             $count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$safe_table}`" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- table name from SHOW TABLES, escaped via esc_sql()
-            $state['current_count'] = $count;
+            $cursor['current_count'] = $count;
 
             // Row-size probe: sample up to 10 rows and re-apply Loop 3 cap now.
             $avg_row_bytes = $this->db_probe_row_size( $safe_table );
@@ -421,7 +449,7 @@ class WPCM_Exporter {
                 $rows_per_call = max( self::WPCM_DB_ROWS_MIN, min( $rows_per_call, $packet_cap, self::WPCM_DB_ROWS_MAX ) );
             }
         } else {
-            $count = (int) $state['current_count'];
+            $count = (int) $cursor['current_count'];
         }
 
         // ── Start timing this call ─────────────────────────────────────────────
@@ -499,39 +527,62 @@ class WPCM_Exporter {
         $t_real   = microtime( true ) - $t_start;
         $mem_peak = max( 0, memory_get_peak_usage( true ) - $mem_before );
 
-        $offset += $rows_per_call;
+        // Ne pas avancer l'offset si la table est vide.
+        if ( $count > 0 ) {
+            $offset += $rows_per_call;
+        }
 
         // ── Table finished? Advance to the next one. ──────────────────────────
-        if ( $offset >= $count ) {
+        // Court-circuit sur tables vides (count=0) + condition défensive.
+        if ( $count === 0 || $offset >= $count ) {
             $table_info[] = [
                 'name' => $table,
                 'rows' => $count,
                 'file' => $filename,
             ];
+            // Persist table_info to disk immediately (stays out of the cursor).
+            file_put_contents( $info_file, wp_json_encode( $table_info ), LOCK_EX );
             $table_idx++;
             $offset        = 0;
-            $avg_row_bytes = 0; // Will be re-probed on next table's first call.
-            unset( $state['current_count'] );
+            $avg_row_bytes = 0;
+            unset( $cursor['current_count'] );
         }
 
-        // ── Persist cursor with updated adaptive state ────────────────────────
-        $state['table_idx']     = $table_idx;
-        $state['offset']        = $offset;
-        $state['table_info']    = $table_info;
-        $state['rows_per_call'] = $rows_per_call;
-        $state['t_prev']        = round( $t_real, 4 );
-        $state['mem_prev']      = $mem_peak;
-        $state['avg_row_bytes'] = $avg_row_bytes;
-        $state['max_packet']    = $max_packet;
+        // ── Persist cursor (scalaires uniquement) sur disque ─────────────────
+        // Les grosses données (tables, table_info) sont dans leurs propres
+        // fichiers JSON. Le curseur ne contient que des scalaires → petite
+        // taille garantie, pas de risque de dépassement de quota.
+        $cursor['table_idx']     = $table_idx;
+        $cursor['offset']        = $offset;
+        $cursor['rows_per_call'] = $rows_per_call;
+        $cursor['t_prev']        = round( $t_real, 4 );
+        $cursor['mem_prev']      = $mem_peak;
+        $cursor['avg_row_bytes'] = $avg_row_bytes;
+        $cursor['max_packet']    = $max_packet;
 
         // Check again: did we just finish the last table?
         if ( $table_idx >= $total_tables ) {
-            delete_transient( $cursor_key );
+            // Clean up cursor files — session dir is kept for packaging.
+            @unlink( $cursor_file );
             return $this->finish_database_step( $table_info, $sql_dir, $total_tables );
         }
 
-        // Transient TTL: 2 hours — enough for any realistic export.
-        set_transient( $cursor_key, $state, 2 * HOUR_IN_SECONDS );
+        // Write cursor atomically: write to .tmp then rename (atomic on most FS).
+        $tmp = $cursor_file . '.tmp';
+        if ( file_put_contents( $tmp, wp_json_encode( $cursor ), LOCK_EX ) === false
+            || ! rename( $tmp, $cursor_file ) ) {
+            // Disk write failed — stop immediately rather than looping forever.
+            @unlink( $tmp );
+            return [
+                'session_id' => $this->session_id,
+                'next_step'  => 'error',
+                'message'    => __(
+                    'Impossible d\'écrire le curseur d\'export sur le disque. '
+                    . 'Vérifiez les permissions du dossier temporaire WordPress (wp-content/wpcm-temp).',
+                    'clone-master'
+                ),
+            ];
+        }
 
         // Progress: database export occupies 10 %→25 % of the total bar.
         $db_progress         = $total_tables > 0 ? (int) ( 15 * $table_idx / $total_tables ) : 15;
