@@ -1,5 +1,5 @@
 /* =============================================================================
-   Clone Master — Interface d'administration · Thème clair professionnel
+   Clone Master : Administration interface · Professional light theme
    ============================================================================= */
 
 #wpcm-admin-root {
@@ -154,7 +154,7 @@ a { color: var(--c-accent); }
 .wpcm-progress-fill.done::after { display:none; }
 @keyframes wpcm-sh { 0%{transform:translateX(-100%)} 100%{transform:translateX(200%)} }
 
-/* Barre indeterminate — utilisée pendant la phase database (chunked) */
+/* Indeterminate bar used during the chunked database phase */
 .wpcm-progress-fill.indeterminate {
     width:100% !important;
     transition:none;
@@ -173,7 +173,7 @@ a { color: var(--c-accent); }
 .wpcm-progress-pct { font-size:12px; font-weight:700; font-family:var(--c-mono); color:var(--c-text-dim); flex-shrink:0; }
 .wpcm-progress-pct.done { color:var(--c-green); }
 
-/* Panneau de détail DB — affiché pendant l'export database chunked */
+/* Database detail panel displayed during chunked export */
 .wpcm-db-detail {
     margin-top:14px; padding:12px 14px;
     background:var(--c-surface-2); border:1px solid var(--c-border);
@@ -189,7 +189,7 @@ a { color: var(--c-accent); }
     font-family:var(--c-mono); font-size:11.5px; font-weight:700;
     color:var(--c-text); flex-shrink:0;
 }
-/* Mini progress bar pour table individuelle */
+/* Compact progress bar for an individual table */
 .wpcm-db-table-bar {
     height:3px; background:var(--c-surface-3); border-radius:99px;
     overflow:hidden; flex:1;
@@ -219,7 +219,7 @@ a { color: var(--c-accent); }
 .wpcm-upload-name { font-size:14px; font-weight:600; color:var(--c-text); margin:0 0 4px; }
 .wpcm-upload-hint { font-size:12px; color:var(--c-text-dim); margin:0; }
 
-/* FORMULAIRES */
+/* FORMS */
 .wpcm-field { margin-bottom:16px; }
 .wpcm-label { display:block; font-size:11.5px; font-weight:700; color:var(--c-text-mid); margin-bottom:6px; letter-spacing:.04em; text-transform:uppercase; }
 .wpcm-input { width:100%; padding:9px 12px; background:var(--c-surface-2); border:1px solid var(--c-border-mid); border-radius:var(--c-r-sm); color:var(--c-text); font-size:13px; font-family:var(--c-font); transition:border-color var(--c-ease),box-shadow var(--c-ease); -webkit-appearance:none; appearance:none; }
@@ -235,7 +235,7 @@ select.wpcm-input { background-image:url("data:image/svg+xml,%3csvg xmlns='http:
 .wpcm-toggle-strong { font-size:13px; font-weight:600; color:var(--c-text); display:block; }
 .wpcm-toggle-sub { font-size:12px; color:var(--c-text-dim); line-height:1.4; display:block; margin-top:2px; }
 
-/* ALERTES */
+/* ALERTS */
 .wpcm-alert { display:flex; align-items:flex-start; gap:10px; padding:12px 14px; border-radius:var(--c-r-sm); font-size:13px; line-height:1.55; border:1px solid; margin:12px 0 0; }
 .wpcm-alert svg { flex-shrink:0; margin-top:1px; }
 .wpcm-alert-success { background:var(--c-green-dim); border-color:var(--c-green-border); color:var(--c-green); }
@@ -243,7 +243,7 @@ select.wpcm-input { background-image:url("data:image/svg+xml,%3csvg xmlns='http:
 .wpcm-alert-error   { background:var(--c-red-dim); border-color:var(--c-red-border); color:var(--c-red); }
 .wpcm-alert-info    { background:var(--c-accent-dim); border-color:rgba(44,95,246,.2); color:var(--c-accent); }
 
-/* JOURNAL */
+/* ACTIVITY LOG */
 .wpcm-log-card-title { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
 .wpcm-log-card-label { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:var(--c-text); }
 .wpcm-log-card-label svg { color:var(--c-accent); }
@@ -265,13 +265,13 @@ select.wpcm-input { background-image:url("data:image/svg+xml,%3csvg xmlns='http:
 .wpcm-manifest-lbl { font-size:10.5px; font-weight:700; color:var(--c-text-dim); text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
 .wpcm-manifest-val { font-size:13px; font-weight:600; color:var(--c-text); word-break:break-all; line-height:1.3; }
 
-/* SECTION OPTIONS */
+/* OPTIONS SECTION */
 .wpcm-opts-section { margin-bottom:20px; padding-bottom:20px; border-bottom:1px solid var(--c-border); }
 .wpcm-opts-section:last-child { border-bottom:none; margin-bottom:0; padding-bottom:0; }
 .wpcm-opts-section-title { display:flex; align-items:center; gap:7px; font-size:11.5px; font-weight:700; color:var(--c-text-mid); text-transform:uppercase; letter-spacing:.06em; margin-bottom:12px; }
 .wpcm-opts-section-title svg { color:var(--c-accent); }
 
-/* SERVEUR */
+/* SERVER */
 .wpcm-stats-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; margin-bottom:16px; }
 .wpcm-stat-card { background:var(--c-surface-2); border:1px solid var(--c-border); border-radius:var(--c-r-sm); padding:14px 16px; }
 .wpcm-stat-lbl { font-size:11px; color:var(--c-text-dim); margin:0 0 4px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
@@ -295,7 +295,7 @@ select.wpcm-input { background-image:url("data:image/svg+xml,%3csvg xmlns='http:
 .wpcm-badge-local { background:#f0f2f7; color:#4b5471; border:1px solid #c8cedf; }
 .wpcm-badge-nc    { background:#eef2ff; color:#2c5ff6; border:1px solid #c7d4fc; }
 
-/* TABLEAU */
+/* TABLE */
 .wpcm-table-wrap { overflow-x:auto; margin:0 -2px; }
 .wpcm-table { width:100%; border-collapse:collapse; font-size:13px; min-width:540px; }
 .wpcm-table thead th { text-align:left; padding:0 14px 10px; font-size:11px; font-weight:700; color:var(--c-text-dim); text-transform:uppercase; letter-spacing:.06em; border-bottom:1px solid var(--c-border); }
@@ -308,12 +308,12 @@ select.wpcm-input { background-image:url("data:image/svg+xml,%3csvg xmlns='http:
 .wpcm-filedate { color:var(--c-text-dim); font-size:12.5px; }
 .wpcm-table-actions { display:flex; gap:6px; justify-content:flex-end; align-items:center; flex-wrap:wrap; }
 
-/* ETAT VIDE */
+/* EMPTY STATE */
 .wpcm-empty { text-align:center; padding:40px 20px; }
 .wpcm-empty-ico { width:52px; height:52px; background:var(--c-surface-2); border:1px solid var(--c-border); border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 14px; color:var(--c-text-dim); }
 .wpcm-empty p { font-size:13.5px; color:var(--c-text-dim); margin:0; }
 
-/* SUCCES COMPLET */
+/* COMPLETION STATE */
 .wpcm-complete-box { text-align:center; padding:24px 20px; }
 .wpcm-complete-icon { width:56px; height:56px; background:var(--c-green-dim); border:2px solid var(--c-green-border); border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 14px; color:var(--c-green); }
 .wpcm-complete-title { font-size:16px; font-weight:700; color:var(--c-text); margin:0 0 6px; }
@@ -328,7 +328,7 @@ select.wpcm-input { background-image:url("data:image/svg+xml,%3csvg xmlns='http:
     .wpcm-header p { display:none; }
 }
 
-/* BOUTON CAFÉ FIXE */
+/* FIXED SUPPORT BUTTON */
 #wpcm-coffee-root { position:fixed; bottom:24px; right:24px; z-index:99999; }
 .wpcm-coffee-btn {
     display:inline-flex; align-items:center; gap:8px;
@@ -355,3 +355,153 @@ select.wpcm-input { background-image:url("data:image/svg+xml,%3csvg xmlns='http:
     .wpcm-coffee-label { display:none; }
     .wpcm-coffee-btn { padding:11px; }
 }
+
+/* VERSION 3.1: stable navigation, operation state and production diagnostics */
+.wpcm-title-row { display:flex; align-items:center; gap:9px; min-width:0; }
+.wpcm-version-badge {
+    display:inline-flex; align-items:center; padding:2px 7px;
+    border:1px solid var(--c-border); border-radius:999px;
+    background:var(--c-surface-2); color:var(--c-text-dim);
+    font-family:var(--c-mono); font-size:10px; font-weight:700;
+}
+.wpcm-header-actions { display:flex; align-items:center; justify-content:flex-end; gap:9px; flex-wrap:wrap; }
+.wpcm-diagnostics-shortcut {
+    display:inline-flex; align-items:center; gap:6px; padding:7px 10px;
+    border:1px solid var(--c-border); border-radius:var(--c-r-sm);
+    background:var(--c-surface-2); color:var(--c-text-mid);
+    font:600 12px/1.2 var(--c-font); cursor:pointer;
+    transition:all var(--c-ease);
+}
+.wpcm-diagnostics-shortcut:hover { border-color:var(--c-accent); color:var(--c-accent); background:var(--c-accent-dim); }
+.wpcm-operation-pill {
+    display:inline-flex; align-items:center; gap:7px; max-width:320px;
+    padding:7px 11px; border:1px solid rgba(44,95,246,.22);
+    border-radius:999px; background:var(--c-accent-dim); color:var(--c-accent);
+    font-size:11.5px; font-weight:700; line-height:1.2;
+}
+.wpcm-operation-banner {
+    display:flex; align-items:flex-start; gap:9px; margin:-5px 0 16px;
+    padding:10px 13px; border:1px solid var(--c-orange-border);
+    border-radius:var(--c-r-sm); background:var(--c-orange-dim);
+    color:var(--c-orange); font-size:12px; line-height:1.5;
+}
+.wpcm-tab-panel[hidden] { display:none !important; }
+.wpcm-tab-panel.active { animation:wpcm-in .15s ease; }
+.wpcm-tabs { position:sticky; top:32px; z-index:20; }
+.wpcm-tab:focus-visible,
+.wpcm-btn:focus-visible,
+.wpcm-diagnostics-shortcut:focus-visible,
+.wpcm-debug-filter:focus-visible { outline:3px solid var(--c-accent-glow); outline-offset:2px; }
+
+.wpcm-intro-debug { background:#f5f3ff; border-color:#ddd6fe; }
+.wpcm-intro-debug .wpcm-intro-ico { background:#6d28d9; }
+.wpcm-intro-debug h4 { color:#6d28d9; }
+.wpcm-debug-card { padding:0; overflow:hidden; }
+.wpcm-debug-toolbar {
+    display:flex; align-items:flex-start; justify-content:space-between; gap:18px;
+    padding:20px 22px 16px; border-bottom:1px solid var(--c-border);
+}
+.wpcm-debug-toolbar .wpcm-card-desc { margin:4px 0 0; font-family:var(--c-mono); font-size:11px; }
+.wpcm-debug-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+.wpcm-debug-summary {
+    display:flex; align-items:center; gap:6px; padding:12px 22px;
+    border-bottom:1px solid var(--c-border); background:var(--c-surface-2); overflow-x:auto;
+}
+.wpcm-debug-filter {
+    display:inline-flex; align-items:center; gap:7px; padding:6px 10px;
+    border:1px solid var(--c-border); border-radius:999px;
+    background:var(--c-surface); color:var(--c-text-mid);
+    font:600 11px/1 var(--c-font); text-transform:capitalize; cursor:pointer;
+}
+.wpcm-debug-filter span {
+    min-width:18px; padding:2px 5px; border-radius:999px;
+    background:var(--c-surface-3); color:var(--c-text-dim); text-align:center; font-family:var(--c-mono);
+}
+.wpcm-debug-filter.active { border-color:var(--c-accent); background:var(--c-accent-dim); color:var(--c-accent); }
+.wpcm-debug-list { max-height:620px; overflow:auto; padding:12px; background:#f7f8fb; }
+.wpcm-debug-event {
+    margin:0 0 8px; border:1px solid var(--c-border); border-left:4px solid #94a3b8;
+    border-radius:8px; background:var(--c-surface); overflow:hidden;
+}
+.wpcm-debug-event.level-warning { border-left-color:#d97706; }
+.wpcm-debug-event.level-error,
+.wpcm-debug-event.level-critical { border-left-color:#dc2626; }
+.wpcm-debug-event.level-info { border-left-color:#2563eb; }
+.wpcm-debug-event summary {
+    display:grid; grid-template-columns:auto minmax(180px,1fr) minmax(150px,auto) auto;
+    align-items:center; gap:10px; padding:10px 12px; cursor:pointer; list-style:none;
+}
+.wpcm-debug-event summary::-webkit-details-marker { display:none; }
+.wpcm-debug-event summary:hover { background:var(--c-surface-2); }
+.wpcm-debug-level {
+    min-width:58px; padding:3px 7px; border-radius:999px;
+    background:var(--c-surface-3); color:var(--c-text-mid);
+    font-size:10px; font-weight:800; text-align:center; text-transform:uppercase;
+}
+.level-error .wpcm-debug-level,
+.level-critical .wpcm-debug-level { background:var(--c-red-dim); color:var(--c-red); }
+.level-warning .wpcm-debug-level { background:var(--c-orange-dim); color:var(--c-orange); }
+.level-info .wpcm-debug-level { background:var(--c-accent-dim); color:var(--c-accent); }
+.wpcm-debug-event-id { color:var(--c-text-dim); font:10.5px/1.2 var(--c-mono); }
+.wpcm-debug-event time { color:var(--c-text-dim); font:10.5px/1.2 var(--c-mono); white-space:nowrap; }
+.wpcm-debug-meta {
+    display:flex; gap:16px; flex-wrap:wrap; padding:8px 12px;
+    border-top:1px solid var(--c-border); background:var(--c-surface-2);
+    color:var(--c-text-dim); font:10.5px/1.4 var(--c-mono);
+}
+.wpcm-debug-event pre {
+    margin:0; padding:13px; max-height:360px; overflow:auto;
+    border-top:1px solid var(--c-border); background:#111827; color:#d1d5db;
+    font:11px/1.6 var(--c-mono); white-space:pre-wrap; overflow-wrap:anywhere;
+}
+
+@media (max-width: 900px) {
+    #wpcm-admin-root { padding:18px 16px 40px; }
+    .wpcm-header { align-items:flex-start; flex-wrap:wrap; }
+    .wpcm-header-actions { width:100%; justify-content:flex-start; padding-left:58px; }
+    .wpcm-tabs { top:46px; overflow-x:auto; justify-content:flex-start; }
+    .wpcm-tab { flex:0 0 auto; min-width:112px; }
+    .wpcm-debug-toolbar { flex-direction:column; }
+    .wpcm-debug-actions { justify-content:flex-start; }
+    .wpcm-debug-event summary { grid-template-columns:auto 1fr; }
+    .wpcm-debug-event-id, .wpcm-debug-event time { grid-column:2; }
+}
+
+@media (max-width: 520px) {
+    .wpcm-header-actions { padding-left:0; }
+    .wpcm-operation-pill { max-width:100%; }
+    .wpcm-debug-event summary { grid-template-columns:1fr; }
+    .wpcm-debug-event-id, .wpcm-debug-event time { grid-column:auto; }
+}
+
+.wpcm-diagnostics-count {
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width:18px; height:18px; padding:0 5px; margin-left:1px;
+    border-radius:999px; background:var(--c-red); color:#fff;
+    font:800 10px/1 var(--c-mono);
+}
+
+.wpcm-error-notice { align-items:flex-start; }
+.wpcm-error-notice-content { display:flex; flex:1; align-items:flex-start; justify-content:space-between; gap:14px; min-width:0; }
+.wpcm-error-diagnostics-link {
+    display:inline-flex; align-items:center; gap:5px; flex:0 0 auto;
+    padding:5px 8px; border:1px solid currentColor; border-radius:6px;
+    background:transparent; color:inherit; font:700 11px/1.2 var(--c-font); cursor:pointer;
+}
+.wpcm-error-diagnostics-link:hover { background:rgba(255,255,255,.55); }
+@media (max-width:600px) { .wpcm-error-notice-content { flex-direction:column; } }
+
+
+/* React runtime isolation */
+.wpcm-runtime-error {
+    display:flex; align-items:flex-start; gap:14px; border-color:var(--c-orange-border);
+    background:var(--c-orange-dim); color:var(--c-text);
+}
+.wpcm-runtime-error-icon {
+    display:flex; align-items:center; justify-content:center; flex:0 0 auto;
+    width:38px; height:38px; border-radius:10px; background:#fff7ed; color:var(--c-orange);
+}
+.wpcm-runtime-error-content { flex:1; min-width:0; }
+.wpcm-runtime-error-content .wpcm-card-title { margin-bottom:6px; color:var(--c-orange); }
+.wpcm-runtime-error-content .wpcm-card-desc { margin-bottom:14px; overflow-wrap:anywhere; }
+.wpcm-runtime-error-actions { display:flex; flex-wrap:wrap; gap:8px; }

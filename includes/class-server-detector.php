@@ -1,6 +1,6 @@
 <?php
 /**
- * Server Detector — Scans hosting environment constraints
+ * Server Detector : Scans hosting environment constraints
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
@@ -74,7 +74,7 @@ class WPCM_Server_Detector {
             'permalink'      => get_option( 'permalink_structure' ),
             'site_url'       => site_url(),
             'home_url'       => home_url(),
-            // Absolute server paths intentionally omitted — they are not needed by
+            // Absolute server paths intentionally omitted : they are not needed by
             // the diagnostic UI and exposing them leaks the server directory layout
             // to any admin-level user (unnecessary attack surface reduction).
             'uploads_size'   => $this->dir_size( wp_upload_dir()['basedir'] ),
@@ -130,8 +130,8 @@ class WPCM_Server_Detector {
     }
 
     private function extensions_info() {
-        $required = [ 'zip', 'mysqli', 'json', 'mbstring', 'zlib' ];
-        $optional = [ 'openssl', 'curl', 'fileinfo', 'gd', 'imagick' ];
+        $required = [ 'mysqli', 'json', 'zlib', 'openssl' ];
+        $optional = [ 'curl', 'fileinfo', 'gd', 'imagick' ];
         $result = [];
         foreach ( $required as $ext ) {
             $result[ $ext ] = [ 'loaded' => extension_loaded( $ext ), 'required' => true ];
@@ -157,7 +157,8 @@ class WPCM_Server_Detector {
             'exec_available'  => function_exists( 'exec' ) && ! in_array( 'exec', array_map( 'trim', explode( ',', ini_get( 'disable_functions' ) ) ) ),
             'wp_cli'          => defined( 'WP_CLI' ),
             'shell_exec'      => function_exists( 'shell_exec' ) && ! in_array( 'shell_exec', array_map( 'trim', explode( ',', ini_get( 'disable_functions' ) ) ) ),
-            'zip_archive'     => class_exists( 'ZipArchive' ),
+            'wpcm_append_only'=> true,
+            'durable_fsync'   => function_exists( 'fsync' ),
         ];
     }
 

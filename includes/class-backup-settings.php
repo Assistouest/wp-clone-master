@@ -1,6 +1,6 @@
 <?php
 /**
- * WPCM_Backup_Settings — Encapsulates all automatic backup configuration.
+ * WPCM_Backup_Settings : Encapsulates all automatic backup configuration.
  *
  * Settings are stored as a single serialised array in wp_options under
  * 'wpcm_schedule_settings'. History (up to HISTORY_MAX entries, newest first)
@@ -73,54 +73,117 @@ class WPCM_Backup_Settings {
         return $out;
     }
 
-    // ── AES-256-CBC encryption for the Nextcloud app-password ───────────────
-    // Key material: SHA-256( AUTH_KEY + AUTH_SALT ) from wp-config.php.
-    // Requires the PHP openssl extension. The JS UI already enforces this
-    // prerequisite (HAS_OPENSSL flag) so these methods are never called
-    // on servers where openssl is absent — no fallback is provided.
+    // ── Authenticated encryption for the Nextcloud app-password ────────────
+    // New values use AES-256-GCM and include an authentication tag so corrupted
+    // or modified ciphertext is rejected. Legacy AES-256-CBC values remain
+    // readable and are transparently re-encrypted the next time settings save.
 
     private static function cipher_key(): string {
         return hash( 'sha256', AUTH_KEY . AUTH_SALT . 'wpcm_nc', true );
     }
 
     public static function encrypt( string $plain ): string {
-        if ( ! function_exists( 'openssl_encrypt' ) ) {
-            // openssl is absent — the UI prevents reaching this path.
-            // Return empty string so the save() call stores nothing.
+        if ( ! function_exists( 'openssl_encrypt' ) || '' === $plain ) {
             return '';
         }
-        // random_bytes() reads from the OS entropy pool (getrandom/CryptGenRandom) — available since PHP 7.0
-        // (minimum required by this plugin). Replaces openssl_random_pseudo_bytes() whose
-        // $strong parameter could silently be false on some platforms.
-        $iv     = random_bytes( 16 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.rand_random_bytes -- random_bytes() is the correct CSPRNG for PHP 7.0+
-        $cipher = openssl_encrypt( $plain, 'AES-256-CBC', self::cipher_key(), OPENSSL_RAW_DATA, $iv );
-        return base64_encode( $iv . $cipher ); // base64 encodes binary AES output for safe DB storage
+
+        $iv  = random_bytes( 12 ); // 96-bit nonce recommended for GCM.
+        $tag = '';
+        $cipher = openssl_encrypt(
+            $plain,
+            'aes-256-gcm',
+            self::cipher_key(),
+            OPENSSL_RAW_DATA,
+            $iv,
+            $tag,
+            'clone-master-nextcloud',
+            16
+        );
+
+        if ( false === $cipher || 16 !== strlen( $tag ) ) {
+            return '';
+        }
+
+        return 'gcm:' . base64_encode( $iv . $tag . $cipher );
     }
 
     public static function decrypt( string $stored ): string {
         if ( ! function_exists( 'openssl_decrypt' ) || '' === $stored ) {
             return '';
         }
-        $raw    = base64_decode( $stored, true ); // strict=true: returns false on invalid base64
+
+        if ( 0 === strpos( $stored, 'gcm:' ) ) {
+            $raw = base64_decode( substr( $stored, 4 ), true );
+            if ( false === $raw || strlen( $raw ) <= 28 ) {
+                return '';
+            }
+
+            $iv     = substr( $raw, 0, 12 );
+            $tag    = substr( $raw, 12, 16 );
+            $cipher = substr( $raw, 28 );
+            $plain  = openssl_decrypt(
+                $cipher,
+                'aes-256-gcm',
+                self::cipher_key(),
+                OPENSSL_RAW_DATA,
+                $iv,
+                $tag,
+                'clone-master-nextcloud'
+            );
+
+            return false !== $plain ? $plain : '';
+        }
+
+        // Backward compatibility with values written by Clone Master 1.x.
+        $raw = base64_decode( $stored, true );
         if ( false === $raw || strlen( $raw ) <= 16 ) {
             return '';
         }
+
         $iv     = substr( $raw, 0, 16 );
         $cipher = substr( $raw, 16 );
         $plain  = openssl_decrypt( $cipher, 'AES-256-CBC', self::cipher_key(), OPENSSL_RAW_DATA, $iv );
-        return $plain !== false ? $plain : '';
+        return false !== $plain ? $plain : '';
     }
 
     // ── Persistence ──────────────────────────────────────────────────────────
 
     /**
-     * Merge $changes into current settings and persist to the DB.
+     * Build a validated in-memory settings object without changing wp_options.
+     *
+     * @param array $changes Temporary overrides.
+     * @return self
+     */
+    public static function temporary( array $changes ): self {
+        $instance = new self();
+        $instance->apply_changes( $changes );
+        return $instance;
+    }
+
+    /**
+     * Merge changes into current settings and persist them.
+     *
+     * @param array $changes Settings changes.
+     * @return void
      */
     public function save( array $changes ): void {
+        $this->apply_changes( $changes );
+        update_option( self::OPTION_KEY, $this->data, false );
+    }
+
+    /**
+     * Validate and apply settings changes to this object.
+     *
+     * @param array $changes Settings changes.
+     * @return void
+     */
+    private function apply_changes( array $changes ): void {
         $allowed = array_keys( self::$defaults );
 
         foreach ( $changes as $k => $v ) {
-            if ( ! in_array( $k, $allowed, true ) ) continue;
+            if ( ! in_array( $k, $allowed, true ) ) {
+                continue;
+            }
 
             switch ( $k ) {
                 case 'enabled':
@@ -171,28 +234,19 @@ class WPCM_Backup_Settings {
                     break;
 
                 case 'nextcloud_pass':
-                    // Empty string = explicit wipe (disconnect). Non-empty = encrypt & store.
-                    if ( (string) $v === '' ) {
-                        $this->data[ $k ] = '';
-                    } else {
-                        $this->data[ $k ] = self::encrypt( (string) $v );
-                    }
+                    // Empty string explicitly clears the stored credential.
+                    $this->data[ $k ] = '' === (string) $v ? '' : self::encrypt( (string) $v );
                     break;
 
                 case 'nextcloud_keep_local':
-                    $this->data[ $k ] = (bool) $v;
-                    break;
-
                 case 'nextcloud_connected':
                     $this->data[ $k ] = (bool) $v;
                     break;
             }
         }
-
-        update_option( self::OPTION_KEY, $this->data, false );
     }
 
-    // ── History — static helpers (no instance required) ──────────────────────
+    // ── History : static helpers (no instance required) ──────────────────────
 
     /**
      * Prepend a new history entry (newest first) and cap at HISTORY_MAX.
@@ -204,16 +258,31 @@ class WPCM_Backup_Settings {
      *   finished_at  string   'Y-m-d H:i:s'
      *   duration_sec int
      *   status       string   'success' | 'error'
-     *   filename     string   basename of the ZIP, or ''
+     *   filename     string   basename of the WPCM container, or ''
      *   size_bytes   int
      *   error        string|null
      *
      * @param array $entry
      */
     public static function add_history_entry( array $entry ): void {
-        $history = self::get_history();
-        array_unshift( $history, $entry );
-        update_option( self::HISTORY_KEY, array_slice( $history, 0, self::HISTORY_MAX ), false );
+        $lock = WPCM_Reliability::acquire_lock( WPCM_TEMP_DIR . 'backup-history.lock' );
+        if ( false === $lock ) {
+            throw new RuntimeException( __( 'Unable to acquire the backup history lock.', 'clone-master' ) );
+        }
+
+        try {
+            $history = self::get_history();
+            $id      = (string) ( $entry['id'] ?? '' );
+            if ( '' !== $id ) {
+                $history = array_values( array_filter( $history, static function ( $existing ) use ( $id ) {
+                    return ! is_array( $existing ) || (string) ( $existing['id'] ?? '' ) !== $id;
+                } ) );
+            }
+            array_unshift( $history, $entry );
+            update_option( self::HISTORY_KEY, array_slice( $history, 0, self::HISTORY_MAX ), false );
+        } finally {
+            WPCM_Reliability::release_lock( $lock );
+        }
     }
 
     /**

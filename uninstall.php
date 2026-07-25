@@ -22,11 +22,11 @@ delete_option( 'wpcm_deactivated_plugins' );
 
 // ── Filesystem cleanup ────────────────────────────────────────────────────────
 //
-// wpcm-temp/  — temporary session directories created during export and import.
+// wpcm-temp/  : temporary session directories created during export and import.
 //               Always safe to delete: these are transient working files that
 //               should not exist outside an active operation.
 //
-// wpcm-logs/  — rotation logs written by the scheduler. No user-facing value
+// wpcm-logs/  : rotation logs written by the scheduler. No user-facing value
 //               once the plugin is removed.
 //
 // wpcm-backups/ is intentionally NOT deleted here.
@@ -39,7 +39,7 @@ foreach ( array( WP_CONTENT_DIR . '/wpcm-temp/', WP_CONTENT_DIR . '/wpcm-logs/' 
     if ( ! is_dir( $wpcm_dir ) ) {
         continue;
     }
-    // Recursive delete — mirrors the logic in WPCM_Plugin::recursive_delete().
+    // Recursive delete : mirrors the logic in WPCM_Plugin::recursive_delete().
     $wpcm_iterator = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator( $wpcm_dir, RecursiveDirectoryIterator::SKIP_DOTS ),
         RecursiveIteratorIterator::CHILD_FIRST
@@ -73,3 +73,4 @@ if ( $wpcm_timestamp ) {
     wp_unschedule_event( $wpcm_timestamp, 'wpcm_scheduled_backup' );
 }
 wp_clear_scheduled_hook( 'wpcm_scheduled_backup' );
+wp_clear_scheduled_hook( 'wpcm_continue_backup' );

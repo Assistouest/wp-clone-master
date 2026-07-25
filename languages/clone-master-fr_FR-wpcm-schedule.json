@@ -1,0 +1,426 @@
+{
+  "translation-revision-date": "2026-07-25T17:14:00.237657+00:00",
+  "generator": "clone-master-i18n",
+  "source": "clone-master",
+  "domain": "messages",
+  "locale_data": {
+    "messages": {
+      "": {
+        "domain": "messages",
+        "lang": "fr_FR",
+        "plural-forms": "nplurals=2; plural=(n > 1);"
+      },
+      " Automatic backup": [
+        " Sauvegarde automatique"
+      ],
+      " Backup history": [
+        " Historique des sauvegardes"
+      ],
+      " Backup in progress… ": [
+        " Sauvegarde en cours… "
+      ],
+      " DISABLE_WP_CRON is active : automatic backups will not fire via WP-Cron.": [
+        " DISABLE_WP_CRON est actif : les sauvegardes auto ne se déclencheront pas via WP-Cron."
+      ],
+      " Enable automatic backup": [
+        " Activer la sauvegarde automatique"
+      ],
+      " Failure": [
+        " Échec"
+      ],
+      " Keep the ": [
+        " Garder les "
+      ],
+      " Loading…": [
+        " Chargement…"
+      ],
+      " Run now": [
+        " Lancer maintenant"
+      ],
+      " Success": [
+        " Succès"
+      ],
+      " can serve a file directly when its exact unpredictable name is known unless a server rule blocks the directory. ": [
+        " peut servir directement un fichier si son nom exact et imprévisible est connu, sauf si une règle serveur bloque le répertoire. "
+      ],
+      " days": [
+        " jours"
+      ],
+      " extension is missing on this server. Clone Master needs it to encrypt your Nextcloud credentials before storing them. ": [
+        " est absente sur ce serveur. Clone Master en a besoin pour chiffrer vos identifiants Nextcloud avant de les stocker. "
+      ],
+      " files. The directory ": [
+        ". Le répertoire "
+      ],
+      " in your ": [
+        " dans votre "
+      ],
+      " latest backups  ": [
+        " dernières sauvegardes  "
+      ],
+      " or contact your host. In the meantime, only local storage is available.": [
+        " ou contactez votre hébergeur. En attendant, seul le stockage local est disponible."
+      ],
+      " or for ": [
+        " ou pendant "
+      ],
+      "Add this block to your Nginx configuration and reload it:": [
+        "Ajoutez ce bloc à votre configuration Nginx et rechargez-le :"
+      ],
+      "Also keep a local copy after upload": [
+        "Conserver aussi une copie locale après l'envoi"
+      ],
+      "Always": [
+        "Toujours"
+      ],
+      "Automatic": [
+        "Automatique"
+      ],
+      "Backup complete : ": [
+        "Sauvegarde terminée : "
+      ],
+      "Backup destination": [
+        "Destination des sauvegardes"
+      ],
+      "Backups are stored in ": [
+        "Les sauvegardes sont stockées dans "
+      ],
+      "Cancel": [
+        "Annuler"
+      ],
+      "Clear history": [
+        "Effacer l'historique"
+      ],
+      "Clear the entire backup history?": [
+        "Effacer tout l’historique des sauvegardes ?"
+      ],
+      "Connect to Nextcloud": [
+        "Connecter Nextcloud"
+      ],
+      "Connect to your Nextcloud in one click. A window will open for you to authorise access : no password is entered here.": [
+        "Connectez-vous à votre Nextcloud en un clic. Une fenêtre s'ouvrira pour que vous puissiez autoriser l'accès : aucun mot de passe n'est saisi ici."
+      ],
+      "Connected to Nextcloud": [
+        "Connecté à Nextcloud"
+      ],
+      "Connection cancelled : the window was closed.": [
+        "Connexion annulée : la fenêtre a été fermée."
+      ],
+      "Date": [
+        "Date"
+      ],
+      "Disconnect": [
+        "Déconnecter"
+      ],
+      "Duration": [
+        "Durée"
+      ],
+      "Email notifications": [
+        "Notifications email"
+      ],
+      "Every day": [
+        "Chaque jour"
+      ],
+      "Every hour": [
+        "Toutes les heures"
+      ],
+      "Every month": [
+        "Chaque mois"
+      ],
+      "Every week": [
+        "Chaque semaine"
+      ],
+      "Failure: ": [
+        "Échec : "
+      ],
+      "Fatal PHP error detected. ": [
+        "Erreur PHP fatale détectée. "
+      ],
+      "File / Error": [
+        "Fichier / Erreur"
+      ],
+      "Folder on Nextcloud": [
+        "Dossier sur Nextcloud"
+      ],
+      "Frequency": [
+        "Fréquence"
+      ],
+      "Local": [
+        "Local"
+      ],
+      "Local storage": [
+        "Stockage local"
+      ],
+      "Log in to Nextcloud in the window that just opened, then click 'Authorise'.": [
+        "Connectez-vous à Nextcloud dans la fenêtre qui vient de s’ouvrir, puis cliquez sur « Autoriser »."
+      ],
+      "Manual": [
+        "Manuel"
+      ],
+      "Never": [
+        "Jamais"
+      ],
+      "Next run: ": [
+        "Prochaine exécution : "
+      ],
+      "Nextcloud unavailable : OpenSSL extension missing": [
+        "Nextcloud indisponible : extension OpenSSL absente"
+      ],
+      "Nextcloud unavailable: PHP OpenSSL extension is missing on this server.": [
+        "Nextcloud indisponible : l'extension PHP OpenSSL est absente sur ce serveur."
+      ],
+      "Nginx detected : add server-level backup protection": [
+        "Nginx détecté : ajoutez une protection au niveau du serveur"
+      ],
+      "Nginx ignores ": [
+        "Nginx ignore les fichiers "
+      ],
+      "No backups in history.": [
+        "Aucune sauvegarde dans l'historique."
+      ],
+      "On failure only": [
+        "En cas d'échec uniquement"
+      ],
+      "PHP parse error. ": [
+        "Erreur de syntaxe PHP. "
+      ],
+      "Please enter your Nextcloud server URL.": [
+        "Saisissez l'URL de votre serveur Nextcloud."
+      ],
+      "Refresh": [
+        "Actualiser"
+      ],
+      "Retention": [
+        "Rétention"
+      ],
+      "Retention applies only to automatic backups (domain-backup-auto marker). Manual backups are never deleted.": [
+        "S'applique uniquement aux sauvegardes automatiques (marqueur domaine-backup-auto). Les sauvegardes manuelles ne sont jamais supprimées."
+      ],
+      "Save settings": [
+        "Sauvegarder"
+      ],
+      "Saving…": [
+        "Sauvegarde en cours…"
+      ],
+      "Schedule": [
+        "Planification"
+      ],
+      "Security check failed : reload the page.": [
+        "Vérification de sécurité échouée : rechargez la page."
+      ],
+      "Server error": [
+        "Erreur serveur"
+      ],
+      "Set up a real system cron: ": [
+        "Configurez une vraie tâche cron système : "
+      ],
+      "Size": [
+        "Taille"
+      ],
+      "Status": [
+        "Statut"
+      ],
+      "Storage": [
+        "Stockage"
+      ],
+      "The PHP ": [
+        "L’extension PHP "
+      ],
+      "The URL must start with https://": [
+        "L’URL doit commencer par https://"
+      ],
+      "The folder will be created automatically if it does not exist.": [
+        "Le dossier sera créé automatiquement s'il n'existe pas."
+      ],
+      "To enable it, add ": [
+        "Pour l'activer, ajoutez "
+      ],
+      "Trigger": [
+        "Déclencheur"
+      ],
+      "Twice daily": [
+        "2 fois par jour"
+      ],
+      "Unknown error": [
+        "Erreur inconnue"
+      ],
+      "Waiting for authorisation…": [
+        "En attente de votre autorisation…"
+      ],
+      "on this server.": [
+        "sur ce serveur."
+      ],
+      "A PHP fatal error was detected.": [
+        "Une erreur PHP fatale a été détectée."
+      ],
+      "Action": [
+        "Action"
+      ],
+      "All": [
+        "Tous"
+      ],
+      "Another Clone Master operation is already running.": [
+        "Une autre opération Clone Master est déjà en cours."
+      ],
+      "Archive upload and validation in progress": [
+        "Envoi et validation de l'archive en cours"
+      ],
+      "Backup in progress": [
+        "Sauvegarde en cours"
+      ],
+      "Clear log": [
+        "Effacer le journal"
+      ],
+      "Clear the persistent diagnostic log?": [
+        "Effacer le journal de diagnostic persistant ?"
+      ],
+      "Clone Master records each critical transition, caught PHP error, fatal shutdown and unexpected browser response. Secrets are redacted automatically.": [
+        "Clone Master enregistre chaque transition critique, erreur PHP interceptée, arrêt fatal et réponse inattendue du navigateur. Les secrets sont masqués automatiquement."
+      ],
+      "Clone Master sections": [
+        "Sections de Clone Master"
+      ],
+      "Diagnostic event": [
+        "Événement de diagnostic"
+      ],
+      "Diagnostic journal": [
+        "Journal de diagnostic"
+      ],
+      "Diagnostics": [
+        "Diagnostics"
+      ],
+      "Download report": [
+        "Télécharger le rapport"
+      ],
+      "Finish the current operation before starting another restore.": [
+        "Terminez l'opération actuelle avant de démarrer une autre restauration."
+      ],
+      "Installer error.": [
+        "Erreur de l'installeur."
+      ],
+      "Loading diagnostics...": [
+        "Chargement des diagnostics..."
+      ],
+      "Loading schedule settings...": [
+        "Chargement de la planification..."
+      ],
+      "Network error during restore: ": [
+        "Erreur réseau pendant la restauration : "
+      ],
+      "Network error.": [
+        "Erreur réseau."
+      ],
+      "No diagnostic event matches this filter.": [
+        "Aucun événement de diagnostic ne correspond à ce filtre."
+      ],
+      "Open Diagnostics to inspect the captured response.": [
+        "Ouvrez Diagnostics pour examiner la réponse capturée."
+      ],
+      "Open Diagnostics to view the captured response.": [
+        "Ouvrez Diagnostics pour consulter la réponse capturée."
+      ],
+      "Peak memory": [
+        "Pic mémoire"
+      ],
+      "Persistent production diagnostics": [
+        "Diagnostics persistants de production"
+      ],
+      "Reliable WPCM backups, staged restore and production diagnostics": [
+        "Sauvegardes WPCM fiables, restauration préparée et diagnostics de production"
+      ],
+      "Request": [
+        "Requête"
+      ],
+      "Server error without detail.": [
+        "Erreur serveur sans détail."
+      ],
+      "The PHP execution time was exceeded.": [
+        "Le temps d'exécution PHP a été dépassé."
+      ],
+      "The PHP memory limit was exceeded.": [
+        "La limite de mémoire PHP a été dépassée."
+      ],
+      "The WordPress security session expired. Reload the page and try again.": [
+        "La session de sécurité WordPress a expiré. Rechargez la page puis réessayez."
+      ],
+      "The current operation keeps running when you change tabs. Do not reload or close this page until it finishes.": [
+        "L'opération actuelle continue lorsque vous changez d'onglet. Ne rechargez pas et ne fermez pas cette page avant sa fin."
+      ],
+      "The installer returned an invalid response during step ": [
+        "L'installeur a renvoyé une réponse invalide pendant l'étape "
+      ],
+      "The response body was empty.": [
+        "Le corps de la réponse était vide."
+      ],
+      "The restore step timed out. The signed journal can resume the same step.": [
+        "L'étape de restauration a dépassé le délai. Le journal signé permet de reprendre la même étape."
+      ],
+      "The server rejected the upload size.": [
+        "Le serveur a refusé la taille de l'envoi."
+      ],
+      "The server returned an invalid JSON payload.": [
+        "Le serveur a renvoyé une charge JSON invalide."
+      ],
+      "The server returned an unexpected response.": [
+        "Le serveur a renvoyé une réponse inattendue."
+      ],
+      "The upload endpoint returned an invalid JSON payload.": [
+        "Le point d'envoi a renvoyé une charge JSON invalide."
+      ],
+      "The upload endpoint returned an invalid response.": [
+        "Le point d'envoi a renvoyé une réponse invalide."
+      ],
+      "Timeout: the server may still be processing.": [
+        "Délai dépassé : le serveur traite peut-être encore l'opération."
+      ],
+      "Transactional restore in progress": [
+        "Restauration transactionnelle en cours"
+      ],
+      "Server error.": [
+        "Erreur serveur."
+      ],
+      "The server returned an invalid response.": [
+        "Le serveur a renvoyé une réponse invalide."
+      ],
+      "A fatal PHP error interrupted the request. Open Diagnostics and use the event ID below.": [
+        "Une erreur PHP fatale a interrompu la requête. Ouvrez Diagnostics et utilisez l’identifiant d’événement ci-dessous."
+      ],
+      "Diagnostic log cleared.": [
+        "Journal de diagnostic effacé."
+      ],
+      "JavaScript is required for resumable backup and restore operations.": [
+        "JavaScript est requis pour les opérations de sauvegarde et de restauration reprenables."
+      ],
+      "Loading interface...": [
+        "Chargement de l'interface..."
+      ],
+      "Loading the backup and restore workspace...": [
+        "Chargement de l'espace de sauvegarde et de restauration..."
+      ],
+      "Unable to encode database credentials for encrypted installer preparation.": [
+        "Impossible d'encoder les identifiants de base de données pour préparer l'installeur chiffré."
+      ],
+      "Unable to encode the automatic recovery key envelope.": [
+        "Impossible d'encoder l'enveloppe de la clé de récupération automatique."
+      ],
+      "Unable to encode the transactional installer configuration.": [
+        "Impossible d'encoder la configuration de l'installeur transactionnel."
+      ],
+      "WordPress could not determine the authenticated admin origin.": [
+        "WordPress n'a pas pu déterminer l'origine authentifiée de l'administration."
+      ],
+      "WordPress could not resolve the uploads directory for the restore plan.": [
+        "WordPress n'a pas pu déterminer le répertoire des médias pour le plan de restauration."
+      ],
+      "WordPress database context is unavailable during installer preparation.": [
+        "Le contexte de base de données WordPress est indisponible pendant la préparation de l'installeur."
+      ],
+      "Operation in progress": [
+        "Opération en cours"
+      ],
+      "View diagnostics": [
+        "Voir les diagnostics"
+      ]
+    }
+  }
+}

@@ -1,311 +1,663 @@
 <?php
 /**
- * Importer — Generates and manages a standalone installer
+ * Importer preparation and archive validation.
  *
- * APPROACH (same as Duplicator/All-in-One WP Migration):
- * Instead of importing through WordPress AJAX (which breaks when we replace
- * the database), we generate a STANDALONE PHP script that:
- * 1. Runs independently of WordPress (no WP bootstrap)
- * 2. Has its own authentication (secret token)
- * 3. Handles DB import, file extraction, URL replacement
- * 4. Deletes itself when done
+ * The destructive restore work is delegated to the static standalone installer,
+ * but no installer is activated until the uploaded archive has passed structural
+ * and cryptographic integrity checks.
  *
- * The WordPress plugin handles:
- * - Upload of the archive
- * - Extraction + manifest reading
- * - Generation of the standalone installer
- * - Redirecting the JS to talk to the installer directly
+ * @package Clone_Master
  */
 
-if ( ! defined( 'ABSPATH' ) ) exit;
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
 
 class WPCM_Importer {
 
     /**
-     * Called from WP AJAX — only handles upload, extract, and installer generation.
-     * The actual import is done by the standalone installer.
+     * Run an importer preparation step.
+     *
+     * @param string $step             Step name.
+     * @param string $session_id       Existing session ID.
+     * @param string $file_path        Uploaded or local backup path.
+     * @param string $new_url          Destination URL.
+     * @param string $import_opts_json JSON options.
+     * @return array
+     * @throws Exception On validation or preparation failure.
      */
-    public function run_step( $step, $session_id, $file_path = '', $new_url = '', $import_opts = '' ) {
+    public function run_step( $step, $session_id, $file_path = '', $new_url = '', $import_opts_json = '' ) {
         switch ( $step ) {
-            case 'extract': return $this->step_extract( $file_path );
-            case 'prepare': return $this->step_prepare( $session_id, $new_url, $import_opts );
-            default:        throw new Exception( __( 'Unknown step: ', 'clone-master' ) . $step ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
+            case 'extract':
+                return $this->step_extract( $file_path );
+            case 'prepare':
+                return $this->step_prepare( $session_id, $new_url, $import_opts_json );
+            default:
+                throw new Exception( __( 'Unknown import step.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
     }
 
     /**
-     * Step 1: Extract archive and read manifest
+     * Safely extract and validate a backup archive.
+     *
+     * @param string $file_path Archive path.
+     * @return array
+     * @throws Exception On invalid or unsafe archives.
      */
     private function step_extract( $file_path ) {
-        if ( ! file_exists( $file_path ) ) {
-            throw new Exception( __( 'Archive file not found', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
+        if ( ! is_file( $file_path ) || ! is_readable( $file_path ) ) {
+            throw new Exception( __( 'WPCM archive not found or unreadable.', 'clone-master' ) );
+        }
+        if ( 'wpcm' !== strtolower( pathinfo( $file_path, PATHINFO_EXTENSION ) ) ) {
+            throw new Exception( __( 'Only .wpcm backup containers are accepted.', 'clone-master' ) );
         }
 
-        $session_id  = 'import_' . gmdate( 'Ymd_His' ) . '_' . wp_generate_password( 16, false );
-        $session_dir = WPCM_TEMP_DIR . $session_id . '/';
-        wp_mkdir_p( $session_dir );
-        // Protect immediately — the parent wpcm-temp/.htaccess may not propagate
-        // to subdirs on hosts with AllowOverride None.
-        WPCM_Plugin::protect_directory( $session_dir );
-
-        $zip = new ZipArchive();
-        if ( $zip->open( $file_path ) !== true ) {
-            throw new Exception( __( 'Cannot open ZIP archive', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
+        for ( $attempt = 0; $attempt < 5; $attempt++ ) {
+            $session_id  = 'import_' . gmdate( 'Ymd_His' ) . '_' . strtolower( wp_generate_password( 24, false, false ) );
+            $session_dir = WPCM_TEMP_DIR . $session_id . '/';
+            if ( ! file_exists( $session_dir ) && ! is_link( $session_dir ) ) break;
         }
-
-        // ── ZIP Slip guard ────────────────────────────────────────────────────
-        // ZipArchive::extractTo() does NOT prevent entries containing '../' from
-        // writing outside $session_dir. A crafted archive could place a PHP file
-        // anywhere on the server. Validate every entry before extraction.
-        $real_session = realpath( $session_dir );
-        if ( ! $real_session ) {
-            $zip->close();
-            throw new Exception( __( 'Cannot resolve session directory path.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
+        if ( file_exists( $session_dir ) || is_link( $session_dir ) || ! wp_mkdir_p( $session_dir ) ) {
+            throw new Exception( __( 'Unable to allocate a protected import workspace.', 'clone-master' ) );
         }
-        for ( $i = 0; $i < $zip->numFiles; $i++ ) {
-            $entry_name = $zip->getNameIndex( $i );
-            // Resolve the prospective destination path; use a fake root so
-            // realpath() does not require the path to exist yet.
-            $dest_path = $real_session . '/' . $entry_name;
-            // Normalise manually: collapse every '..' segment
-            $parts  = [];
-            foreach ( explode( '/', str_replace( '\\', '/', $dest_path ) ) as $part ) {
-                if ( $part === '..' ) {
-                    array_pop( $parts );
-                } elseif ( $part !== '.' && $part !== '' ) {
-                    $parts[] = $part;
-                }
-            }
-            $normalised = '/' . implode( '/', $parts );
-            if ( strpos( $normalised, $real_session ) !== 0 ) {
-                $zip->close();
-                // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-                // Reason: Exception is caught internally by the caller and its message is
-                // never sent directly to the browser. The __() return value does not need
-                // to be escaped here; output escaping happens at render time, not at the
-                // point of string construction. Using esc_html() inside the Exception
-                // message would corrupt the string if it were later logged to a file.
-                throw new Exception( sprintf(
-                    /* translators: %1$s: ZIP entry name */
-                    __( 'Invalid archive: path traversal detected in entry "%1$s".', 'clone-master' ),
-                    esc_html( $entry_name )
-                ) );
-                // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-            }
+        WPCM_Plugin::protect_directory( $session_dir, false );
+
+        $lock = WPCM_Reliability::acquire_lock( $session_dir . '.extract.lock' );
+        if ( false === $lock ) {
+            throw new Exception( __( 'The WPCM container is already being analysed.', 'clone-master' ) );
         }
-        // ─────────────────────────────────────────────────────────────────────
+        try {
+            $inspection = WPCM_Archive::inspect( $file_path, $session_dir );
+            $manifest   = $this->normalize_wpcm_manifest( $inspection['manifest'], $session_dir );
+            $manifest_path = $session_dir . 'manifest.json';
+            WPCM_Reliability::atomic_json( $manifest_path, $manifest );
+            $this->validate_manifest( $manifest, $session_dir );
 
-        $zip->extractTo( $session_dir );
-        $zip->close();
+            WPCM_Reliability::atomic_signed_json(
+                $session_dir . 'archive-validation.json',
+                array(
+                    'validated_at'               => gmdate( 'c' ),
+                    'archive'                    => basename( $file_path ),
+                    'archive_sha256'             => (string) $inspection['file_sha256'],
+                    'payload_sha256'             => (string) $inspection['sha256'],
+                    'database_sha256'            => (string) $manifest['sha256_database'],
+                    'files_count'                => (int) $manifest['files_count'],
+                    'files_size'                 => (int) $manifest['files_size'],
+                    'normalized_manifest_sha256' => WPCM_Reliability::checksum( $manifest_path ),
+                    'format'                     => 'wpcm-append-only',
+                    'schema_version'             => '2.0',
+                ),
+                'import-validation:' . $session_id
+            );
 
-        // Find manifest
-        $manifest_path = $this->find_manifest( $session_dir );
-        if ( ! $manifest_path ) {
-            throw new Exception( __( 'Invalid archive: manifest.json not found', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
+            return array(
+                'session_id' => $session_id,
+                'manifest'   => array(
+                    'site_url'       => $manifest['site_url'],
+                    'wp_version'     => $manifest['wp_version'] ?? 'Unknown',
+                    'created_at'     => $manifest['created_at'] ?? 'Unknown',
+                    'db_prefix'      => $manifest['db_prefix'],
+                    'tables_count'   => count( $manifest['tables'] ),
+                    'active_plugins' => $manifest['active_plugins'],
+                    'active_theme'   => $manifest['active_theme'],
+                    'integrity'      => 'verified-wpcm',
+                ),
+                'next_step' => 'prepare',
+                'progress'  => 15,
+                'message'   => __( 'WPCM container fully validated block by block and extracted atomically.', 'clone-master' ),
+            );
+        } catch ( Throwable $error ) {
+            $this->recursive_delete( $session_dir );
+            throw $error;
+        } finally {
+            WPCM_Reliability::release_lock( $lock );
         }
-        $manifest = json_decode( file_get_contents( $manifest_path ), true );
-
-        return [
-            'session_id' => $session_id,
-            'manifest'   => [
-                'site_url'       => $manifest['site_url'] ?? 'Unknown',
-                'wp_version'     => $manifest['wp_version'] ?? 'Unknown',
-                'created_at'     => $manifest['created_at'] ?? 'Unknown',
-                'db_prefix'      => $manifest['db_prefix'] ?? 'wp_',
-                'tables_count'   => count( $manifest['tables'] ?? [] ),
-                'active_plugins' => $manifest['active_plugins'] ?? [],
-                'active_theme'   => $manifest['active_theme'] ?? 'Unknown',
-            ],
-            'next_step' => 'prepare',
-            'progress'  => 15,
-            'message'   => 'Archive extracted. Backup from: ' . ( $manifest['site_url'] ?? 'Unknown' ),
-        ];
     }
 
     /**
-     * Step 2: Write installer_config.json and return the URL of the static installer.
+     * Serialize preparation requests for one validated import session.
      *
-     * The static installer.php lives permanently in the plugin directory (SVN-versioned).
-     * This method no longer generates PHP code at runtime — it only writes a JSON config
-     * file into the already-protected session directory (wpcm-temp/{session_id}/).
-     *
-     * Session_id is appended as ?sid= to the installer URL so no JS changes are needed.
+     * @param string $session_id       Import session ID.
+     * @param string $new_url          Destination URL.
+     * @param string $import_opts_json JSON options.
+     * @return array
+     * @throws Exception On lock or preparation failure.
      */
     private function step_prepare( $session_id, $new_url, $import_opts_json = '' ) {
+        if ( ! preg_match( '/^[a-zA-Z0-9_]{1,100}$/', $session_id ) ) {
+            throw new Exception( __( 'Invalid import session.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+        }
+        $session_dir = WPCM_TEMP_DIR . $session_id . '/';
+        $lock        = WPCM_Reliability::acquire_lock( $session_dir . 'prepare.lock' );
+        if ( false === $lock ) {
+            throw new Exception( __( 'Another request is preparing this restore session.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+        }
+        try {
+            return $this->step_prepare_locked( $session_id, $new_url, $import_opts_json );
+        } finally {
+            WPCM_Reliability::release_lock( $lock );
+        }
+    }
+
+    /**
+     * Prepare the authenticated standalone installer.
+     *
+     * @param string $session_id       Import session ID.
+     * @param string $new_url          Destination URL.
+     * @param string $import_opts_json JSON options.
+     * @return array
+     * @throws Exception On preparation failure.
+     */
+    private function step_prepare_locked( $session_id, $new_url, $import_opts_json = '' ) {
+        global $wpdb;
+
+        if ( ! preg_match( '/^[a-zA-Z0-9_]{1,100}$/', $session_id ) ) {
+            throw new Exception( __( 'Invalid import session.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+        }
+
         $session_dir = WPCM_TEMP_DIR . $session_id . '/';
         if ( ! is_dir( $session_dir ) ) {
-            throw new Exception( __( 'Session not found', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
+            throw new Exception( __( 'Import session not found.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
 
-        $manifest = json_decode( file_get_contents( $this->find_manifest( $session_dir ) ), true );
+        $manifest_path = $this->find_manifest( $session_dir );
+        $manifest      = $manifest_path ? json_decode( (string) file_get_contents( $manifest_path ), true ) : null; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Local validated file.
+        if ( ! is_array( $manifest ) ) {
+            throw new Exception( __( 'Validated manifest is missing.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+        }
 
-        // ── Client-generated token (zero-knowledge pattern) ──────────────────────
-        // The browser generates a cryptographically random 256-bit token via
-        // crypto.getRandomValues() and sends it in the *request* body only once.
-        // We never generate it server-side and never return it in any response,
-        // so it never appears in DevTools response tabs, proxy logs, or XSS leaks.
-        //
-        // The token serves two purposes simultaneously:
-        //   1. Authentication  → bcrypt hash baked into the installer PHP file.
-        //                        Even if installer.php is read from disk, the hash
-        //                        cannot be reversed without the original token.
-        //   2. AES-256 key     → SHA-256(token) encrypts DB credentials in
-        //                        installer_config.json. Both files + the original
-        //                        token are required to recover DB credentials.
+        $validation = WPCM_Reliability::read_signed_json(
+            $session_dir . 'archive-validation.json',
+            'import-validation:' . $session_id
+        );
+        if ( ! is_array( $validation ) || empty( $validation['normalized_manifest_sha256'] ) ) {
+            throw new Exception( __( 'The authenticated archive validation record is missing or invalid.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+        }
+        $current_manifest_hash = WPCM_Reliability::checksum( $manifest_path );
+        if ( ! hash_equals( (string) $validation['normalized_manifest_sha256'], $current_manifest_hash ) ) {
+            throw new Exception( __( 'The archive manifest changed after validation.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+        }
+        $this->validate_manifest( $manifest, $session_dir );
+        WPCM_Debug_Log::write( 'info', 'installer_prepare_manifest_validated', array( 'session_id' => $session_id, 'tables' => count( $manifest['tables'] ?? array() ), 'files' => (int) ( $manifest['files_count'] ?? 0 ) ) );
+
+        $destination_url = esc_url_raw( $new_url ?: site_url(), array( 'http', 'https' ) );
+        $destination     = wp_parse_url( $destination_url );
+        if ( empty( $destination_url ) || empty( $destination['scheme'] ) || empty( $destination['host'] ) || ! in_array( strtolower( $destination['scheme'] ), array( 'http', 'https' ), true ) ) {
+            throw new Exception( __( 'The destination URL must be a valid HTTP or HTTPS URL.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+        }
+        $destination_url = untrailingslashit( $destination_url );
+
         // phpcs:disable WordPress.Security.NonceVerification.Missing
-        // Reason: This is a standalone installer endpoint authenticated via a bcrypt
-        // token (password_verify), not a standard WP form. WP nonces are user-session-
-        // bound and cannot be generated before the site is fully operational, which is
-        // precisely the scenario this installer handles. Security is enforced by the
-        // bcrypt token check below (work factor 10, ~80 ms — brute-force infeasible).
-        // Token format: 32 random bytes encoded as a 64-char lowercase hex string,
-        // produced by crypto.getRandomValues() + Array.map(b => b.toString(16).padStart(2,'0')).join('').
-        // We validate the exact expected format with a regex instead of sanitize_text_field():
-        //   - sanitize_text_field() would be safe for hex, but it silently strips/transforms
-        //     characters, which could corrupt a future token encoding change without any error.
-        //   - Explicit regex makes the contract clear and fails loudly if the format drifts.
-        // wp_unslash() first (WPCS MissingUnslash), then no further transformation.
-        $client_token = isset( $_POST['installer_token'] )
-            ? wp_unslash( $_POST['installer_token'] ) // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Validated immediately below via regex; sanitize_text_field() would silently corrupt the hex value
-            : '';
+        $client_token = isset( $_POST['installer_token'] ) ? wp_unslash( $_POST['installer_token'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Strict regex validation follows.
         // phpcs:enable WordPress.Security.NonceVerification.Missing
-
-        // Strict format check: exactly 64 lowercase hex characters (32 bytes from crypto.getRandomValues()).
-        // Rejects empty strings, wrong lengths, non-hex chars, and any injection attempt.
-        if ( ! preg_match( '/^[0-9a-f]{64}$/', $client_token ) ) {
-            throw new Exception( __( 'Missing or invalid installer token (expected 64-char hex string).', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
+        if ( ! is_string( $client_token ) || ! preg_match( '/^[a-f0-9]{64}$/', $client_token ) ) {
+            throw new Exception( __( 'Invalid installer token.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+        }
+        if ( ! function_exists( 'openssl_encrypt' ) ) {
+            throw new Exception( __( 'The PHP OpenSSL extension is required for transactional restoration.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
 
-        // bcrypt hash (work factor 10, ~80 ms) — baked into installer.php.
-        // password_verify() is the only way in; brute-force is computationally infeasible.
-        $token_hash = password_hash( $client_token, PASSWORD_BCRYPT, [ 'cost' => 10 ] );
-        if ( $token_hash === false ) {
-            throw new Exception( __( 'bcrypt hashing failed — check PHP bcrypt support.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception messages are caught internally; not output to browser
+        WPCM_Debug_Log::write( 'info', 'installer_prepare_crypto_started', array( 'session_id' => $session_id ) );
+        $token_hash = password_hash( $client_token, PASSWORD_BCRYPT, array( 'cost' => 11 ) );
+        if ( false === $token_hash ) {
+            throw new Exception( __( 'Unable to secure the installer token.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
 
-        // Installer TTL: 15 minutes from now.
-        // The installer auto-deletes itself if called after this timestamp.
-        $expires_at = time() + ( 15 * MINUTE_IN_SECONDS );
-
-        // Encrypt DB credentials with AES-256-CBC.
-        // Key = SHA-256 of the client token (32 bytes). IV = random 16 bytes.
-        // installer_config.json holds only the encrypted blob — useless without the token.
-        // installer.php holds only the bcrypt hash — useless without the token.
-        // An attacker must compromise both files AND intercept the token to recover creds.
-        $enc_key  = hash( 'sha256', $client_token, true ); // 32-byte AES key
-        // random_bytes() is the preferred CSPRNG since PHP 7.0 (reads from the OS
-        // entropy pool: getrandom() on Linux, CryptGenRandom on Windows).
-        // openssl_random_pseudo_bytes() is kept as a fallback for PHP < 7.0 only —
-        // on some platforms its second $strong parameter can silently be false.
-        $enc_iv   = function_exists( 'random_bytes' )
-            ? random_bytes( 16 )
-            : openssl_random_pseudo_bytes( 16 );
-        $db_plain = wp_json_encode( [
-            'db_host'    => DB_HOST,
-            'db_name'    => DB_NAME,
-            'db_user'    => DB_USER,
-            'db_pass'    => DB_PASSWORD,
-            'db_charset' => defined( 'DB_CHARSET' ) ? DB_CHARSET : 'utf8mb4',
-        ] );
-        $db_cipher = function_exists( 'openssl_encrypt' )
-            ? openssl_encrypt( $db_plain, 'AES-256-CBC', $enc_key, OPENSSL_RAW_DATA, $enc_iv )
-            : false;
-        // Graceful degradation: if openssl is absent, store an empty placeholder.
-        // db_connect() in the installer will call die_json() when decryption fails.
-        $db_credentials_enc = $db_cipher !== false
-            ? base64_encode( $enc_iv . $db_cipher )
-            : '';
-
-        // Canonical admin origin for CORS whitelist (baked at generation time,
-        // never reflected from the request — prevents CORS wildcard exploitation).
-        $admin_origin = rtrim( admin_url(), '/' );
-        // Strip path component: keep scheme + host only (e.g. https://example.com)
-        $parsed_origin = wp_parse_url( $admin_origin );
-        $safe_origin   = ( $parsed_origin['scheme'] ?? 'https' ) . '://' . ( $parsed_origin['host'] ?? '' );
-        if ( ! empty( $parsed_origin['port'] ) ) {
-            $safe_origin .= ':' . $parsed_origin['port'];
+        $enc_key  = hash( 'sha256', $client_token, true );
+        $enc_iv   = random_bytes( 12 );
+        $enc_tag  = '';
+        $db_plain = wp_json_encode(
+            array(
+                'db_host'    => DB_HOST,
+                'db_name'    => DB_NAME,
+                'db_user'    => DB_USER,
+                'db_pass'    => DB_PASSWORD,
+                'db_charset' => defined( 'DB_CHARSET' ) ? DB_CHARSET : 'utf8mb4',
+            )
+        );
+        if ( ! is_string( $db_plain ) ) {
+            throw new RuntimeException( __( 'Unable to encode database credentials for encrypted installer preparation.', 'clone-master' ) );
+        }
+        $db_cipher = openssl_encrypt( $db_plain, 'aes-256-gcm', $enc_key, OPENSSL_RAW_DATA, $enc_iv, $enc_tag, $session_id );
+        if ( false === $db_cipher ) {
+            throw new Exception( __( 'Unable to encrypt database credentials.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
 
-        // Collect all info the installer needs.
-        // token_hash, expires_at, and allowed_origin are now stored in the JSON config
-        // instead of being injected into a generated PHP file. The static installer.php
-        // reads these values at startup. Security is unchanged: db_credentials_enc is
-        // useless without the client token, and token_hash cannot be reversed.
-        $installer_config = [
-            'token_hash'         => $token_hash,    // bcrypt — cannot be reversed
-            'expires_at'         => $expires_at,    // Unix timestamp — 15 min TTL
-            'allowed_origin'     => $safe_origin,   // hardcoded at prepare time (not reflected from request)
+        $admin_parts = wp_parse_url( admin_url() );
+        if ( ! is_array( $admin_parts ) || empty( $admin_parts['host'] ) ) {
+            throw new RuntimeException( __( 'WordPress could not determine the authenticated admin origin.', 'clone-master' ) );
+        }
+        $safe_origin = ( $admin_parts['scheme'] ?? 'https' ) . '://' . $admin_parts['host'];
+        if ( ! empty( $admin_parts['port'] ) ) {
+            $safe_origin .= ':' . (int) $admin_parts['port'];
+        }
+
+        $restore_id       = substr( hash( 'sha256', $session_id . $client_token ), 0, 10 );
+        $recovery_key     = bin2hex( random_bytes( 32 ) );
+        $staging_prefix   = 'wpcmstg_' . $restore_id . '_';
+        $rollback_prefix  = 'wpcmrb_' . $restore_id . '_';
+        $rollback_dir     = trailingslashit( WP_CONTENT_DIR ) . 'wpcm-rollback-' . $restore_id . '/';
+        $staging_dir      = $session_dir . 'staging/';
+        $import_opts      = json_decode( $import_opts_json ?: '{}', true );
+        if ( ! is_array( $import_opts ) ) {
+            $import_opts = array();
+        }
+        $import_opts = array(
+            'reset_permalinks' => ! empty( $import_opts['reset_permalinks'] ),
+            'block_indexing'   => ! empty( $import_opts['block_indexing'] ),
+        );
+
+        $uploads = wp_upload_dir();
+        if ( ! is_array( $uploads ) || ! empty( $uploads['error'] ) || empty( $uploads['basedir'] ) ) {
+            throw new RuntimeException( __( 'WordPress could not resolve the uploads directory for the restore plan.', 'clone-master' ) );
+        }
+        if ( ! isset( $wpdb ) || ! is_object( $wpdb ) || empty( $wpdb->prefix ) ) {
+            throw new RuntimeException( __( 'WordPress database context is unavailable during installer preparation.', 'clone-master' ) );
+        }
+
+        $config = array(
+            'format_version'     => 2,
+            'token_hash'         => $token_hash,
+            'expires_at'         => time() + ( 6 * HOUR_IN_SECONDS ),
+            'allowed_origin'     => $safe_origin,
+            'session_id'         => $session_id,
             'session_dir'        => $session_dir,
+            'manifest_path'      => $manifest_path,
+            'restore_id'         => $restore_id,
+            'recovery_key'       => $recovery_key,
             'old_url'            => $manifest['site_url'] ?? '',
             'old_home'           => $manifest['home_url'] ?? '',
-            'new_url'            => $new_url ?: site_url(),
+            'new_url'            => $destination_url,
             'old_path'           => $manifest['abspath'] ?? '',
             'new_path'           => ABSPATH,
             'old_prefix'         => $manifest['db_prefix'] ?? 'wp_',
-            'db_credentials_enc' => $db_credentials_enc,
-            'db_charset'         => defined( 'DB_CHARSET' ) ? DB_CHARSET : 'utf8mb4',
-            'table_prefix'   => $GLOBALS['wpdb']->prefix,
-            'wp_content_dir' => WP_CONTENT_DIR,
-            'theme_root'     => get_theme_root(),
-            'plugin_dir'     => WP_PLUGIN_DIR,
-            'uploads_dir'    => wp_upload_dir()['basedir'],
-            'abspath'        => ABSPATH,
-            // The canonical WordPress slug for this plugin, e.g. "clone-master/clone-master.php".
-            // IMPORTANT: __FILE__ here would resolve to class-importer.php (the current file),
-            // not the main plugin file. We must use WPCM_PLUGIN_DIR which is defined via __FILE__
-            // in clone-master.php — the only place where __FILE__ gives the correct plugin root.
-            'plugin_slug'    => plugin_basename( WPCM_PLUGIN_DIR . 'clone-master.php' ),
-            'plugin_folder'  => basename( rtrim( WPCM_PLUGIN_DIR, '/\\' ) ),
-            // User-chosen import options (locale, reset_permalinks)
-            'import_opts'    => json_decode( $import_opts_json ?: '{}', true ) ?: [],
-        ];
-
-        // Save config for the static installer.
-        // installer_config.json is written into the already-protected session dir.
-        // installer.php (static, SVN-versioned) reads it via relative path at runtime.
-        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- Background context; WP_Filesystem requires admin credentials
-        file_put_contents(
-            $session_dir . 'installer_config.json',
-            wp_json_encode( $installer_config, JSON_PRETTY_PRINT )
+            'staging_rewrite_version' => 2,
+            'staging_prefix'     => $staging_prefix,
+            'rollback_prefix'    => $rollback_prefix,
+            'target_prefix'      => $wpdb->prefix,
+            'db_credentials'     => base64_encode( $enc_iv . $enc_tag . $db_cipher ),
+            'db_aad'             => $session_id,
+            'staging_dir'        => $staging_dir,
+            'rollback_dir'       => $rollback_dir,
+            'wp_content_dir'     => WP_CONTENT_DIR,
+            'theme_root'         => get_theme_root(),
+            'plugin_dir'         => WP_PLUGIN_DIR,
+            'uploads_dir'        => (string) $uploads['basedir'],
+            'abspath'            => ABSPATH,
+            'plugin_slug'        => plugin_basename( WPCM_PLUGIN_DIR . 'clone-master.php' ),
+            'plugin_folder'      => basename( rtrim( WPCM_PLUGIN_DIR, '/\\' ) ),
+            'recovery_bootstrap' => WPCM_PLUGIN_DIR . 'includes/recovery-bootstrap.php',
+            'expected_tables'    => array_values( $manifest['tables'] ?? array() ),
+            'expected_archives'  => $manifest['archives'] ?? array(),
+            'content_presence'   => $manifest['content_presence'] ?? array(),
+            'files_count'        => (int) ( $manifest['files_count'] ?? 0 ),
+            'files_size'         => (int) ( $manifest['files_size'] ?? 0 ),
+            'root_files'         => array_values( $manifest['root_files'] ?? array() ),
+            'active_plugins'     => array_values( $manifest['active_plugins'] ?? array() ),
+            'active_theme'       => (string) ( $manifest['active_theme'] ?? '' ),
+            'import_opts'        => $import_opts,
+            'debug_log_path'     => WPCM_Debug_Log::path(),
         );
 
-        // Build the installer URL: static file in the plugin directory + session_id as query param.
-        // No PHP is generated, no file is written to ABSPATH or anywhere outside wpcm-temp/.
-        // The session_id in the URL is not sensitive (security is the bcrypt token in POST).
-        $installer_url = plugins_url( 'installer.php', WPCM_PLUGIN_DIR . 'clone-master.php' )
-                       . '?sid=' . rawurlencode( $session_id );
+        $config_path = $session_dir . 'installer-config.php';
+        $config_json = wp_json_encode( $config, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION );
+        if ( ! is_string( $config_json ) ) {
+            throw new RuntimeException( __( 'Unable to encode the transactional installer configuration.', 'clone-master' ) );
+        }
+        $payload = "<?php\nhttp_response_code(404);\nexit;\n__halt_compiler();\n" . $config_json;
+        WPCM_Reliability::atomic_write( $config_path, $payload, 0600 );
+        WPCM_Debug_Log::write( 'info', 'installer_prepare_config_written', array( 'session_id' => $session_id, 'config_path' => basename( $config_path ) ) );
 
-        // auth_token is intentionally absent from this response.
-        // The browser already holds the token it generated — it never needs to read it back.
-        return [
+        // Store the recovery key separately, encrypted with the destination site's
+        // WordPress salts. This lets Clone Master roll back an abandoned destructive
+        // transition after WordPress can boot again, without storing the installer token.
+        $site_key = WPCM_Reliability::recovery_encryption_key();
+        $recovery_iv = random_bytes( 12 );
+        $recovery_tag = '';
+        $recovery_cipher = openssl_encrypt( $recovery_key, 'aes-256-gcm', $site_key, OPENSSL_RAW_DATA, $recovery_iv, $recovery_tag, $session_id );
+        if ( false === $recovery_cipher ) {
+            throw new Exception( __( 'Unable to encrypt the automatic recovery key.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+        }
+        $recovery_json = wp_json_encode(
+            array(
+                'session_id' => $session_id,
+                'payload'    => base64_encode( $recovery_iv . $recovery_tag . $recovery_cipher ),
+            ),
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+        );
+        if ( ! is_string( $recovery_json ) ) {
+            throw new RuntimeException( __( 'Unable to encode the automatic recovery key envelope.', 'clone-master' ) );
+        }
+        $recovery_payload = "<?php
+http_response_code(404);
+exit;
+__halt_compiler();
+" . $recovery_json;
+        WPCM_Reliability::atomic_write( $session_dir . 'recovery-key.php', $recovery_payload, 0600 );
+
+        $initial_state = array(
+            'version'            => 2,
+            'restore_id'         => $restore_id,
+            'phase'              => 'prepared',
+            'updated_at'         => gmdate( 'c' ),
+            'db'                 => array( 'file_index' => 0, 'byte_offset' => 0, 'queries' => 0, 'errors' => 0 ),
+            'files'              => array(
+                'staged'         => false,
+                'promotion_plan' => array(),
+                'promoted'       => array(),
+                'bootstrap'      => array(),
+            ),
+            'replace'            => array( 'table_index' => 0, 'last_key' => null, 'rows' => 0, 'cells' => 0, 'serialized' => 0, 'skipped' => array() ),
+            'database_committed' => false,
+            'rollback_required'  => false,
+            'health'             => array(),
+        );
+        $this->write_signed_state( $session_dir, $initial_state, $client_token, $recovery_key, $config );
+        WPCM_Reliability::atomic_write( trailingslashit( $rollback_dir ) . 'recovery-key.php', $recovery_payload, 0600 );
+        WPCM_Debug_Log::write( 'info', 'installer_prepare_journal_written', array( 'session_id' => $session_id, 'restore_id' => $restore_id ) );
+
+        $locator       = rtrim( strtr( base64_encode( WP_CONTENT_DIR ), '+/', '-_' ), '=' );
+        $locator_hmac  = hash_hmac( 'sha256', $session_id . '|' . $locator, hash( 'sha256', $client_token, true ) );
+        $installer_url = add_query_arg(
+            array(
+                'sid'  => $session_id,
+                'loc'  => $locator,
+                'lsig' => $locator_hmac,
+            ),
+            WPCM_PLUGIN_URL . 'installer.php'
+        );
+
+        WPCM_Debug_Log::write( 'info', 'installer_prepare_completed', array( 'session_id' => $session_id, 'restore_id' => $restore_id ) );
+
+        return array(
             'session_id'    => $session_id,
             'installer_url' => $installer_url,
             'next_step'     => null,
             'progress'      => 20,
-            'message'       => 'Standalone installer ready. Starting import...',
-        ];
+            'message'       => __( 'Transactional installer prepared. Existing data will remain untouched until final promotion.', 'clone-master' ),
+        );
     }
 
     /**
-     * Previously: generate_installer_code()
+     * Write two alternating HMAC-protected state copies.
      *
-     * Removed in v1.1.0. The standalone installer is now a STATIC file
-     * (installer.php) versioned in SVN alongside the plugin. All dynamic
-     * values (token_hash, expires_at, allowed_origin, session paths) are
-     * written to installer_config.json by step_prepare() and read by the
-     * static installer at startup.
-     *
-     * This eliminates:
-     *   - Runtime PHP code generation (HEREDOC → WP.org PCP ERROR)
-     *   - Writing PHP files to ABSPATH (WP.org review blocker)
-     *   - The WP.org review objection to dynamic executable code creation
+     * @param string $session_dir Session directory.
+     * @param array  $state       Restore state.
+     * @param string $token       Installer token.
+     * @return void
      */
-
-    private function find_manifest( $dir ) {
-        if ( file_exists( $dir . 'manifest.json' ) ) return $dir . 'manifest.json';
-        foreach ( glob( $dir . '*/', GLOB_ONLYDIR ) as $sub ) {
-            if ( file_exists( $sub . 'manifest.json' ) ) return $sub . 'manifest.json';
+    private function write_signed_state( $session_dir, array $state, $token, $recovery_key, array $config ) {
+        $state['sequence']   = max( 1, (int) ( $state['sequence'] ?? 1 ) );
+        $state['updated_at'] = gmdate( 'c' );
+        $json                = wp_json_encode( $state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION );
+        if ( ! is_string( $json ) ) {
+            throw new RuntimeException( 'Unable to encode the signed restore state.' );
         }
-        return null;
+        $envelope            = array(
+            'state' => $state,
+            'hmac'  => hash_hmac( 'sha256', $json, hash( 'sha256', $token, true ) ),
+        );
+        WPCM_Reliability::atomic_json( $session_dir . 'restore-state-a.json', $envelope );
+        WPCM_Reliability::atomic_json( $session_dir . 'restore-state-b.json', $envelope );
+
+        $plan = array(
+            'state'  => $state,
+            'config' => array(
+                'session_id'      => $config['session_id'],
+                'restore_id'      => $config['restore_id'],
+                'staging_prefix'  => $config['staging_prefix'],
+                'rollback_prefix' => $config['rollback_prefix'],
+                'target_prefix'   => $config['target_prefix'],
+                'rollback_dir'    => $config['rollback_dir'],
+                'staging_dir'     => $config['staging_dir'],
+                'abspath'            => $config['abspath'],
+                'wp_content_dir'      => $config['wp_content_dir'],
+                'plugin_dir'          => $config['plugin_dir'],
+                'plugin_folder'       => $config['plugin_folder'],
+                'recovery_bootstrap'  => $config['recovery_bootstrap'],
+            ),
+        );
+        $plan_json = wp_json_encode( $plan, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION );
+        $recovery_binary = hex2bin( $recovery_key );
+        if ( ! is_string( $plan_json ) || false === $recovery_binary ) {
+            throw new RuntimeException( 'Unable to encode the redundant recovery plan.' );
+        }
+        $plan['hmac'] = hash_hmac( 'sha256', $plan_json, $recovery_binary );
+        $signed_plan_json = wp_json_encode( $plan, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION );
+        if ( ! is_string( $signed_plan_json ) ) {
+            throw new RuntimeException( 'Unable to encode the signed redundant recovery plan.' );
+        }
+        $payload = "<?php
+http_response_code(404);
+exit;
+__halt_compiler();
+" . $signed_plan_json;
+        WPCM_Reliability::atomic_write( $session_dir . 'recovery-plan.php', $payload, 0600 );
+
+        if ( ! is_dir( $config['rollback_dir'] ) && ! wp_mkdir_p( $config['rollback_dir'] ) ) {
+            throw new RuntimeException( 'Unable to create the redundant recovery directory.' );
+        }
+        WPCM_Plugin::protect_directory( $config['rollback_dir'], false );
+        WPCM_Reliability::atomic_write( trailingslashit( $config['rollback_dir'] ) . 'recovery-plan.php', $payload, 0600 );
+    }
+
+    /**
+     * Validate a manifest and all listed checksums.
+     *
+     * @param array  $manifest Manifest data.
+     * @param string $base_dir Extracted archive root.
+     * @return void
+     * @throws Exception On integrity failure.
+     */
+    private function validate_manifest( array $manifest, $base_dir ) {
+        foreach ( array( 'schema_version', 'format', 'site_url', 'table_prefix', 'sha256_database', 'files_count', 'files_size', 'tables' ) as $required ) {
+            if ( ! array_key_exists( $required, $manifest ) ) {
+                throw new Exception( sprintf( 'Invalid WPCM manifest: field "%s" is missing.', $required ) );
+            }
+        }
+        if ( '2.0' !== (string) $manifest['schema_version'] || 'wpcm-append-only' !== (string) $manifest['format'] ) {
+            throw new Exception( __( 'Unsupported WPCM schema.', 'clone-master' ) );
+        }
+        if ( ! preg_match( '/^[A-Za-z0-9_]+$/', (string) $manifest['table_prefix'] ) ) {
+            throw new Exception( __( 'Invalid WPCM table prefix.', 'clone-master' ) );
+        }
+        $database = trailingslashit( $base_dir ) . 'database.sql';
+        if ( ! is_file( $database ) || ! is_readable( $database ) ) {
+            throw new Exception( __( 'The validated WPCM database stream is missing.', 'clone-master' ) );
+        }
+        $database_hash = hash_file( 'sha256', $database );
+        if ( ! is_string( $database_hash ) || ! hash_equals( (string) $manifest['sha256_database'], $database_hash ) ) {
+            throw new Exception( __( 'The extracted database stream failed SHA-256 validation.', 'clone-master' ) );
+        }
+
+        $files_root = trailingslashit( $base_dir ) . 'wp-content/';
+        $count = 0;
+        $bytes = 0;
+        if ( is_dir( $files_root ) ) {
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator( $files_root, RecursiveDirectoryIterator::SKIP_DOTS )
+            );
+            foreach ( $iterator as $item ) {
+                if ( $item->isLink() ) {
+                    throw new Exception( __( 'A symbolic link appeared after WPCM extraction.', 'clone-master' ) );
+                }
+                if ( $item->isFile() ) {
+                    $size = $item->getSize();
+                    $count++;
+                    $bytes += (int) $size;
+                }
+            }
+        }
+        if ( $count !== (int) $manifest['files_count'] || $bytes !== (int) $manifest['files_size'] ) {
+            throw new Exception( __( 'The extracted WPCM file inventory no longer matches the manifest.', 'clone-master' ) );
+        }
+        if ( empty( $manifest['tables'] ) ) {
+            throw new Exception( __( 'The database stream does not contain a verifiable table inventory.', 'clone-master' ) );
+        }
+    }
+
+    /**
+     * Resolve the normalized manifest created by the validated extraction step.
+     *
+     * @param string $session_dir Protected import workspace.
+     * @return string|null
+     */
+    private function find_manifest( $session_dir ) {
+        $session_real  = realpath( $session_dir );
+        $manifest_path = trailingslashit( $session_dir ) . 'manifest.json';
+        $manifest_real = realpath( $manifest_path );
+        if ( false === $session_real || false === $manifest_real || ! is_file( $manifest_real ) || ! is_readable( $manifest_real ) || is_link( $manifest_path ) ) {
+            return null;
+        }
+        $prefix = rtrim( $session_real, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR;
+        if ( 0 !== strpos( $manifest_real, $prefix ) ) {
+            return null;
+        }
+        return $manifest_real;
+    }
+
+    /**
+     * Normalize the agent manifest and derive optional transactional metadata.
+     *
+     * @param array  $manifest   Raw WPCM manifest.
+     * @param string $session_dir Extracted session directory.
+     * @return array
+     */
+    private function normalize_wpcm_manifest( array $manifest, $session_dir ) {
+        if ( '2.0' !== (string) ( $manifest['schema_version'] ?? '' )
+            || 'wpcm-append-only' !== (string) ( $manifest['format'] ?? '' ) ) {
+            throw new Exception( __( 'This file is not a WP Commander compatible WPCMARCHIVE2 container.', 'clone-master' ) );
+        }
+        $prefix = (string) ( $manifest['table_prefix'] ?? '' );
+        if ( ! preg_match( '/^[A-Za-z0-9_]+$/', $prefix ) ) {
+            throw new Exception( __( 'The WPCM table prefix is invalid.', 'clone-master' ) );
+        }
+        $manifest['db_prefix']      = $prefix;
+        $manifest['home_url']       = (string) ( $manifest['home_url'] ?? $manifest['site_url'] ?? '' );
+        $manifest['site_url']       = (string) ( $manifest['site_url'] ?? $manifest['home_url'] );
+        $manifest['abspath']        = (string) ( $manifest['abspath'] ?? '' );
+        $manifest['active_plugins'] = is_array( $manifest['active_plugins'] ?? null ) ? array_values( $manifest['active_plugins'] ) : array();
+        $manifest['active_theme']   = (string) ( $manifest['active_theme'] ?? '' );
+        $manifest['archives']       = array();
+        $manifest['root_files']     = array();
+        $manifest['content_presence'] = array();
+        foreach ( array( 'themes', 'plugins', 'uploads', 'mu-plugins', 'languages' ) as $name ) {
+            $manifest['content_presence'][ $name ] = is_dir( trailingslashit( $session_dir ) . 'wp-content/' . $name );
+        }
+        if ( ! is_array( $manifest['tables'] ?? null ) || empty( $manifest['tables'] ) ) {
+            $manifest['tables'] = $this->derive_table_manifest_from_sql(
+                trailingslashit( $session_dir ) . 'database.sql',
+                $prefix
+            );
+        }
+        return $manifest;
+    }
+
+    /**
+     * Derive table names and schema hashes without modifying SQL payload bytes.
+     *
+     * @param string $path   database.sql path.
+     * @param string $prefix Archived WordPress table prefix.
+     * @return array
+     */
+    private function derive_table_manifest_from_sql( $path, $prefix ) {
+        $handle = @fopen( $path, 'rb' );
+        if ( ! is_resource( $handle ) ) {
+            throw new Exception( __( 'Unable to inspect the WPCM database stream.', 'clone-master' ) );
+        }
+        $tables = array();
+        $buffer = '';
+        $collecting = false;
+        try {
+            while ( false !== ( $line = fgets( $handle, 1048576 ) ) ) {
+                if ( ! $collecting ) {
+                    if ( ! preg_match( '/^\s*CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+`([^`]+)`/i', $line, $match ) ) {
+                        continue;
+                    }
+                    $name = (string) $match[1];
+                    if ( 0 !== strpos( $name, $prefix ) ) {
+                        throw new Exception( 'Archived table does not match the declared prefix: ' . $name );
+                    }
+                    $buffer = $line;
+                    $collecting = true;
+                } else {
+                    $buffer .= $line;
+                }
+                if ( $this->sql_statement_complete( $buffer ) ) {
+                    $normalized = preg_replace( '/^\s*CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS/i', 'CREATE TABLE', trim( $buffer ) );
+                    $normalized = preg_replace( '/\s+AUTO_INCREMENT=\d+/i', '', $normalized );
+                    $normalized = rtrim( trim( (string) $normalized ), ";\r\n\t " );
+                    $tables[] = array(
+                        'name'        => $name,
+                        'schema_hash' => hash( 'sha256', $normalized ),
+                    );
+                    $buffer = '';
+                    $collecting = false;
+                }
+            }
+        } finally {
+            fclose( $handle );
+        }
+        if ( $collecting || empty( $tables ) ) {
+            throw new Exception( __( 'Unable to derive a complete table manifest from database.sql.', 'clone-master' ) );
+        }
+        return $tables;
+    }
+
+    /**
+     * Detect a terminating semicolon outside SQL strings, comments, and backticks.
+     *
+     * @param string $statement SQL buffer.
+     * @return bool
+     */
+    private function sql_statement_complete( $statement ) {
+        $quote = '';
+        $escaped = false;
+        $length = strlen( $statement );
+        for ( $i = 0; $i < $length; $i++ ) {
+            $char = $statement[ $i ];
+            if ( $escaped ) {
+                $escaped = false;
+                continue;
+            }
+            if ( '\\' === $char && "'" === $quote ) {
+                $escaped = true;
+                continue;
+            }
+            if ( '' === $quote && ( "'" === $char || '"' === $char || '`' === $char ) ) {
+                $quote = $char;
+                continue;
+            }
+            if ( '' !== $quote && $char === $quote ) {
+                if ( $i + 1 < $length && $statement[ $i + 1 ] === $quote ) {
+                    $i++;
+                    continue;
+                }
+                $quote = '';
+                continue;
+            }
+            if ( '' === $quote && ';' === $char ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function recursive_delete( $dir ) {
+        if ( ! is_dir( $dir ) ) {
+            return;
+        }
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator( $dir, RecursiveDirectoryIterator::SKIP_DOTS ),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ( $iterator as $item ) {
+            if ( $item->isDir() ) {
+                @rmdir( $item->getRealPath() );
+            } else {
+                @unlink( $item->getRealPath() );
+            }
+        }
+        @rmdir( $dir );
     }
 }

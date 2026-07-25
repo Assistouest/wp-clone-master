@@ -1,29 +1,25 @@
 <?php
 /**
- * WPCM_Scheduler — Automatic backup engine.
+ * Resumable automatic backup scheduler.
  *
- * Responsibilities:
- *   • Register custom WP-Cron intervals (weekly, monthly)
- *   • Schedule / reschedule / cancel the recurring cron event
- *   • Execute a full backup synchronously when the hook fires
- *   • Apply retention policy (count-based or age-based) after every backup
- *   • Write a structured history log via WPCM_Backup_Settings
- *   • Send email notifications on success / failure
+ * Every export transition is persisted in an HMAC-authenticated state file.
+ * A cron request, an administrator status poll, or a later WordPress request can
+ * continue the same job without repeating completed destructive side effects.
  *
- * Automatic backups produce ZIPs prefixed with "auto_" so that retention
- * never touches manually-created backups.
- *
- * Anti-concurrency: a transient lock ('wpcm_backup_lock') prevents two
- * overlapping runs (e.g. if WP-Cron fires twice quickly).
+ * @package Clone_Master
  */
 
-if ( ! defined( 'ABSPATH' ) ) exit;
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
 
 class WPCM_Scheduler {
 
-    const CRON_HOOK = 'wpcm_scheduled_backup';
-    const LOCK_KEY  = 'wpcm_backup_lock';
-    const LOCK_TTL  = 3600; // 1 hour max lock lifetime
+    const CRON_HOOK     = 'wpcm_scheduled_backup';
+    const CONTINUE_HOOK = 'wpcm_continue_backup';
+    const LOCK_KEY      = 'wpcm_backup_lock';
+    const LOCK_TTL      = 3600;
+    const JOB_CONTEXT   = 'scheduled-backup-job:v2';
 
     /** @var WPCM_Backup_Settings */
     private $settings;
@@ -32,323 +28,740 @@ class WPCM_Scheduler {
         $this->settings = new WPCM_Backup_Settings();
     }
 
-    // =========================================================================
-    // Cron interval registration
-    // =========================================================================
-
     /**
-     * Hooked on 'cron_schedules'. Adds 'weekly' and 'monthly'.
+     * Register custom intervals used by the settings screen.
+     *
+     * @param array $schedules Existing schedules.
+     * @return array
      */
     public function register_intervals( array $schedules ): array {
         if ( ! isset( $schedules['weekly'] ) ) {
-            $schedules['weekly'] = [
+            $schedules['weekly'] = array(
                 'interval' => WEEK_IN_SECONDS,
                 'display'  => __( 'Once Weekly', 'clone-master' ),
-            ];
+            );
         }
         if ( ! isset( $schedules['monthly'] ) ) {
-            $schedules['monthly'] = [
+            $schedules['monthly'] = array(
                 'interval' => 30 * DAY_IN_SECONDS,
                 'display'  => __( 'Once Monthly', 'clone-master' ),
-            ];
+            );
         }
         return $schedules;
     }
 
-    // =========================================================================
-    // Schedule management
-    // =========================================================================
-
     /**
-     * (Re)schedules the cron event according to current settings.
-     * Safe to call multiple times — clears the old event first.
+     * Recreate the recurring trigger without touching an active resumable job.
+     *
+     * @return void
      */
     public function schedule_backup(): void {
-        $this->cancel_backup();
+        $this->clear_hook( self::CRON_HOOK );
 
         if ( ! $this->settings->enabled ) {
             return;
         }
 
         $frequency = $this->settings->frequency;
-
-        // Validate interval is registered
         $schedules = wp_get_schedules();
         if ( ! isset( $schedules[ $frequency ] ) ) {
             $frequency = 'daily';
         }
 
-        // Start time: next round hour in the future
-        $start = strtotime( 'next hour' );
-
-        wp_schedule_event( $start, $frequency, self::CRON_HOOK );
+        $scheduled = wp_schedule_event( strtotime( 'next hour' ), $frequency, self::CRON_HOOK );
+        if ( is_wp_error( $scheduled ) || false === $scheduled ) {
+            $message = is_wp_error( $scheduled )
+                ? $scheduled->get_error_message()
+                : __( 'WordPress could not schedule the recurring backup event.', 'clone-master' );
+            throw new RuntimeException( $message );
+        }
     }
 
     /**
-     * Cancels all pending scheduled events for this hook.
+     * Cancel recurring and continuation events.
+     *
+     * The persisted job is intentionally left untouched. Plugin deactivation
+     * removes the temporary directory after calling this method.
+     *
+     * @return void
      */
     public function cancel_backup(): void {
-        $timestamp = wp_next_scheduled( self::CRON_HOOK );
-        while ( $timestamp ) {
-            wp_unschedule_event( $timestamp, self::CRON_HOOK );
-            $timestamp = wp_next_scheduled( self::CRON_HOOK );
-        }
+        $this->clear_hook( self::CRON_HOOK );
+        $this->clear_hook( self::CONTINUE_HOOK );
     }
 
     /**
-     * Returns the Unix timestamp of the next scheduled run, or null.
+     * Return the next recurring backup timestamp.
+     *
+     * @return int|null
      */
     public function get_next_run(): ?int {
-        $ts = wp_next_scheduled( self::CRON_HOOK );
-        return $ts ? (int) $ts : null;
+        $timestamp = wp_next_scheduled( self::CRON_HOOK );
+        return $timestamp ? (int) $timestamp : null;
     }
 
-    // =========================================================================
-    // Backup execution
-    // =========================================================================
-
     /**
-     * Main cron callback — hooked on 'wpcm_scheduled_backup'.
-     * Also callable directly for manual "run now" requests.
+     * Queue a new manual or automatic job with a durable run ID.
      *
-     * @param string $trigger 'auto' | 'manual'
+     * @param string $trigger Job origin.
+     * @return array|WP_Error
      */
-    public function run_backup( string $trigger = 'auto' ): array {
-        // ── Anti-concurrency lock ────────────────────────────────────────────
-        if ( get_transient( self::LOCK_KEY ) ) {
-            return [
-                'status'  => 'skipped',
-                'message' => __( 'A backup is already running. Try again later.', 'clone-master' ),
-            ];
+    public function queue_backup( string $trigger = 'manual' ) {
+        $trigger = 'auto' === $trigger ? 'auto' : 'manual';
+        $lock    = WPCM_Reliability::acquire_lock( $this->job_lock_path() );
+        if ( false === $lock ) {
+            return new WP_Error( 'wpcm_job_lock', __( 'The backup queue is currently busy.', 'clone-master' ) );
         }
-        set_transient( self::LOCK_KEY, 1, self::LOCK_TTL );
-
-        // ── Increase resource limits ─────────────────────────────────────────
-        @set_time_limit( 0 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged
-        @ini_set( 'memory_limit', '512M' ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required for large site backup processing
-
-        $run_id     = gmdate( 'Ymd_His' );
-        $started_at = gmdate( 'Y-m-d H:i:s' );
-        $start_ts   = microtime( true );
-
-        $entry = [
-            'id'           => $run_id,
-            'trigger'      => $trigger,
-            'started_at'   => $started_at,
-            'finished_at'  => '',
-            'duration_sec' => 0,
-            'status'       => 'error',
-            'filename'     => '',
-            'size_bytes'   => 0,
-            'error'        => null,
-        ];
 
         try {
-            // ── Run export steps ─────────────────────────────────────────────
-            $exporter   = new WPCM_Exporter();
-            $init       = $exporter->run_step( 'init' );
-            $session_id = $init['session_id'];
+            $existing = $this->read_job();
+            if ( is_array( $existing ) ) {
+                return new WP_Error(
+                    'wpcm_backup_running',
+                    __( 'A backup is already running. Please wait for it to finish.', 'clone-master' ),
+                    array( 'run_id' => (string) ( $existing['run_id'] ?? '' ) )
+                );
+            }
 
-            $exporter->run_step( 'database',    $session_id );
-            $exporter->run_step( 'files_scan',  $session_id );
+            $run_id = gmdate( 'Ymd_His' ) . '_' . strtolower( wp_generate_password( 8, false, false ) );
+            $job    = array(
+                'format'             => 2,
+                'run_id'             => $run_id,
+                'trigger'            => $trigger,
+                'stage'              => 'export',
+                'step'               => 'init',
+                'session_id'         => '',
+                'package'            => array(),
+                'progress'           => 0,
+                'message'            => __( 'Backup queued.', 'clone-master' ),
+                'created_at'         => time(),
+                'updated_at'         => time(),
+                'finalization_stage' => '',
+                'entry'              => array(
+                    'id'           => $run_id,
+                    'trigger'      => $trigger,
+                    'started_at'   => gmdate( 'Y-m-d H:i:s' ),
+                    'finished_at'  => '',
+                    'duration_sec' => 0,
+                    'status'       => 'running',
+                    'filename'     => '',
+                    'size_bytes'   => 0,
+                    'error'        => null,
+                ),
+            );
+            $this->write_job( $job );
+            $this->schedule_continuation( 1 );
+            return $job;
+        } finally {
+            WPCM_Reliability::release_lock( $lock );
+        }
+    }
 
-            // files_archive loops until the queue is exhausted
-            do {
-                $fa = $exporter->run_step( 'files_archive', $session_id );
-            } while ( isset( $fa['next_step'] ) && $fa['next_step'] === 'files_archive' );
+    /**
+     * Cron callback and synchronous continuation entry point.
+     *
+     * A recurring cron event starts a job when none exists. Continuation hooks
+     * only resume the already persisted job.
+     *
+     * @param string $trigger auto, manual, or resume.
+     * @return array
+     */
+    public function run_backup( string $trigger = 'auto' ): array {
+        $job = $this->read_job();
+        if ( ! is_array( $job ) ) {
+            if ( 'resume' === $trigger ) {
+                return array( 'status' => 'idle' );
+            }
+            $queued = $this->queue_backup( 'manual' === $trigger ? 'manual' : 'auto' );
+            if ( is_wp_error( $queued ) ) {
+                return array(
+                    'status'  => 'error',
+                    'message' => $queued->get_error_message(),
+                );
+            }
+        }
 
-            $exporter->run_step( 'config',  $session_id );
-            $package = $exporter->run_step( 'package', $session_id );
-            $exporter->run_step( 'cleanup', $session_id );
+        return $this->process_slice();
+    }
 
-            // ── Rename with 'auto_' prefix so retention can identify it ──────
-            // Note: step_package() omits 'path' from its return array (the absolute
-            // server path is not exposed to the frontend). In the scheduler context
-            // (server-side cron/manual run) we reconstruct it from 'filename' +
-            // WPCM_BACKUP_DIR, which is always the canonical backup location.
-            $original_name = $package['filename'];
-            $original_path = WPCM_BACKUP_DIR . $original_name;
+    /**
+     * Resume an existing job from the continuation cron hook.
+     *
+     * @return array
+     */
+    public function continue_backup(): array {
+        return $this->run_backup( 'resume' );
+    }
 
-            if ( $trigger === 'auto' && strpos( $original_name, 'auto_' ) !== 0 ) {
-                $auto_name = 'auto_' . $original_name;
-                $auto_path = WPCM_BACKUP_DIR . $auto_name;
-                require_once ABSPATH . 'wp-admin/includes/file.php';
-                WP_Filesystem();
-                global $wp_filesystem;
-                if ( $wp_filesystem && $wp_filesystem->move( $original_path, $auto_path ) ) {
-                    $original_path = $auto_path;
-                    $original_name = $auto_name;
+    /**
+     * Resume one bounded slice while an administrator is polling the status.
+     *
+     * This browser-assisted fallback is important on hosts where loopback
+     * requests or WP-Cron spawning are blocked. The same signed job is used, so
+     * cron and browser requests cannot process a transition concurrently.
+     *
+     * @return array
+     */
+    public function resume_from_status_poll(): array {
+        if ( ! is_array( $this->read_job() ) ) {
+            return array( 'status' => 'idle' );
+        }
+        return $this->process_slice( 8.0, 2 );
+    }
+
+    /**
+     * Return the authenticated active job state.
+     *
+     * @return array|null
+     */
+    public function get_active_job(): ?array {
+        $job = $this->read_job();
+        return is_array( $job ) ? $job : null;
+    }
+
+    /**
+     * Process bounded export/finalization transitions.
+     *
+     * @param float $budget_seconds Maximum wall-clock budget.
+     * @param int   $max_transitions Maximum state transitions.
+     * @return array
+     */
+    private function process_slice( float $budget_seconds = 18.0, int $max_transitions = 8 ): array {
+        $operation_lock = WPCM_Reliability::acquire_lock( WPCM_TEMP_DIR . 'backup-operation.lock' );
+        if ( false === $operation_lock ) {
+            $job = $this->read_job();
+            return array(
+                'status'   => 'running',
+                'run_id'   => (string) ( $job['run_id'] ?? '' ),
+                'progress' => (int) ( $job['progress'] ?? 0 ),
+                'message'  => __( 'Another request is processing this backup.', 'clone-master' ),
+            );
+        }
+
+        set_transient( self::LOCK_KEY, 1, self::LOCK_TTL );
+        $started     = microtime( true );
+        $transitions = 0;
+
+        try {
+            $job = $this->read_job();
+            if ( ! is_array( $job ) ) {
+                return array( 'status' => 'idle' );
+            }
+
+            if ( time() - (int) ( $job['created_at'] ?? time() ) > DAY_IN_SECONDS ) {
+                throw new RuntimeException( __( 'The backup job exceeded the 24-hour safety limit.', 'clone-master' ) );
+            }
+
+            while ( $transitions < $max_transitions && ( microtime( true ) - $started ) < $budget_seconds ) {
+                if ( 'export' === $job['stage'] ) {
+                    $job = $this->process_export_transition( $job );
+                } elseif ( 'finalize' === $job['stage'] ) {
+                    $job = $this->process_finalization_transition( $job );
+                } else {
+                    throw new RuntimeException( __( 'The persisted backup state has an unknown stage.', 'clone-master' ) );
+                }
+
+                ++$transitions;
+                if ( 'complete' === ( $job['stage'] ?? '' ) ) {
+                    return $this->complete_job( $job );
                 }
             }
 
-            $size_bytes = file_exists( $original_path ) ? filesize( $original_path ) : 0;
-
-            $entry['status']       = 'success';
-            $entry['filename']     = $original_name;
-            $entry['size_bytes']   = $size_bytes;
-            $entry['finished_at']  = gmdate( 'Y-m-d H:i:s' );
-            $entry['duration_sec'] = (int) ( microtime( true ) - $start_ts );
-
-            // ── Storage driver upload ─────────────────────────────────────────
-            $driver        = WPCM_Storage_Driver::make( $this->settings );
-            $upload_result = $driver->upload( $original_path, $original_name );
-
-            $entry['storage_driver']  = $driver->label();
-            $entry['storage_ok']      = $upload_result['ok'];
-            $entry['storage_message'] = $upload_result['message'];
-            $entry['remote_path']     = $upload_result['remote_path'] ?? '';
-
-            // If upload failed, flag it (but don't abort — local copy is safe)
-            if ( ! $upload_result['ok'] ) {
-                $entry['storage_error'] = $upload_result['message'];
+            $this->schedule_continuation( 30 );
+            return array(
+                'status'   => 'running',
+                'run_id'   => (string) $job['run_id'],
+                'progress' => (int) ( $job['progress'] ?? 0 ),
+                'message'  => (string) ( $job['message'] ?? __( 'Backup in progress.', 'clone-master' ) ),
+            );
+        } catch ( Throwable $error ) {
+            try {
+                return $this->fail_job( $error );
+            } catch ( Throwable $secondary ) {
+                error_log( 'Clone Master scheduler failure: ' . $error->getMessage() . '; secondary failure: ' . $secondary->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- Terminal background failure must remain diagnosable.
+                return array(
+                    'status'  => 'error',
+                    'message' => $error->getMessage(),
+                );
             }
-
-            // ── Retention ────────────────────────────────────────────────────
-            $this->apply_retention();
-
-            // ── Notification ─────────────────────────────────────────────────
-            $this->send_notification( $entry );
-
-            delete_transient( self::LOCK_KEY );
-
-            return [
-                'status'   => 'success',
-                'filename' => $original_name,
-                'size'     => size_format( $size_bytes ),
-                'duration' => $entry['duration_sec'],
-            ];
-
-        } catch ( \Throwable $e ) {
-            $entry['status']       = 'error';
-            $entry['error']        = $e->getMessage();
-            $entry['finished_at']  = gmdate( 'Y-m-d H:i:s' );
-            $entry['duration_sec'] = (int) ( microtime( true ) - $start_ts );
-
-            $this->send_notification( $entry );
-            delete_transient( self::LOCK_KEY );
-
-            return [
-                'status'  => 'error',
-                'message' => $e->getMessage(),
-            ];
-
         } finally {
-            // Always write history, even if send_notification threw
-            WPCM_Backup_Settings::add_history_entry( $entry );
+            delete_transient( self::LOCK_KEY );
+            WPCM_Reliability::release_lock( $operation_lock );
         }
     }
 
-    // =========================================================================
-    // Retention
-    // =========================================================================
+    /**
+     * Execute one idempotent exporter transition and persist its result.
+     *
+     * @param array $job Job state.
+     * @return array
+     */
+    private function process_export_transition( array $job ): array {
+        $step       = (string) ( $job['step'] ?? 'init' );
+        $session_id = (string) ( $job['session_id'] ?? '' );
+        $exporter   = new WPCM_Exporter();
+        $result     = 'init' === $step
+            ? $exporter->run_step( 'init' )
+            : $exporter->run_step( $step, $session_id );
+
+        if ( ! is_array( $result ) ) {
+            throw new RuntimeException( __( 'The exporter returned an invalid response.', 'clone-master' ) );
+        }
+        if ( 'error' === ( $result['next_step'] ?? '' ) ) {
+            throw new RuntimeException( (string) ( $result['message'] ?? __( 'The export step failed.', 'clone-master' ) ) );
+        }
+
+        if ( ! empty( $result['session_id'] ) ) {
+            $job['session_id'] = (string) $result['session_id'];
+        }
+        if ( 'package' === $step ) {
+            $job['package'] = array(
+                'filename' => sanitize_file_name( (string) ( $result['filename'] ?? '' ) ),
+                'sha256'   => sanitize_text_field( (string) ( $result['sha256'] ?? '' ) ),
+            );
+        }
+
+        $job['progress']   = max( 0, min( 100, (int) ( $result['progress'] ?? $job['progress'] ) ) );
+        $job['message']    = sanitize_text_field( (string) ( $result['message'] ?? '' ) );
+        $job['updated_at'] = time();
+
+        if ( null === ( $result['next_step'] ?? null ) ) {
+            $job['stage']              = 'finalize';
+            $job['step']               = '';
+            $job['finalization_stage'] = 'label';
+            $job['progress']            = 96;
+            $job['message']             = __( 'Export verified. Finalizing backup storage.', 'clone-master' );
+        } else {
+            $job['step'] = (string) $result['next_step'];
+        }
+
+        $this->write_job( $job );
+        return $job;
+    }
 
     /**
-     * Deletes old automatic backups (auto_*.zip) according to the configured
-     * retention policy. Manual backups are never touched.
+     * Execute one retry-safe finalization stage.
+     *
+     * @param array $job Job state.
+     * @return array
+     */
+    private function process_finalization_transition( array $job ): array {
+        $stage = (string) ( $job['finalization_stage'] ?? 'label' );
+
+        switch ( $stage ) {
+            case 'label':
+                $job = $this->finalize_local_archive( $job );
+                $job['finalization_stage'] = 'upload';
+                $job['message']            = __( 'Local archive verified. Applying configured storage.', 'clone-master' );
+                break;
+
+            case 'upload':
+                $path   = WPCM_BACKUP_DIR . (string) $job['entry']['filename'];
+                $driver = WPCM_Storage_Driver::make( $this->settings );
+                $result = $driver->upload( $path, (string) $job['entry']['filename'] );
+                $job['entry']['storage_driver']  = $driver->label();
+                $job['entry']['storage_ok']      = ! empty( $result['ok'] );
+                $job['entry']['storage_message'] = sanitize_text_field( (string) ( $result['message'] ?? '' ) );
+                $job['entry']['remote_path']     = sanitize_text_field( (string) ( $result['remote_path'] ?? '' ) );
+                if ( empty( $result['ok'] ) ) {
+                    $job['entry']['storage_error'] = $job['entry']['storage_message'];
+                    throw new RuntimeException(
+                        $job['entry']['storage_error'] ?: __( 'The configured backup destination rejected the archive.', 'clone-master' )
+                    );
+                }
+                $job['finalization_stage'] = 'local_cleanup';
+                $job['message']            = __( 'Storage result persisted. Applying the local-copy policy.', 'clone-master' );
+                break;
+
+            case 'local_cleanup':
+                if ( 'nextcloud' === $this->settings->storage_driver && false === $this->settings->nextcloud_keep_local ) {
+                    $path = WPCM_BACKUP_DIR . (string) $job['entry']['filename'];
+                    if ( is_file( $path ) ) {
+                        $expected = strtolower( (string) ( $job['entry']['archive_sha256'] ?? '' ) );
+                        $actual   = WPCM_Reliability::checksum( $path );
+                        if ( $expected && ! hash_equals( $expected, strtolower( $actual ) ) ) {
+                            throw new RuntimeException( __( 'The local archive changed before the post-upload cleanup step.', 'clone-master' ) );
+                        }
+                        if ( ! wp_delete_file( $path ) && is_file( $path ) ) {
+                            throw new RuntimeException( __( 'The verified remote backup was stored, but the local copy could not be removed.', 'clone-master' ) );
+                        }
+                    }
+                    $job['entry']['local_copy_kept'] = false;
+                } else {
+                    $job['entry']['local_copy_kept'] = true;
+                }
+                $job['finalization_stage'] = 'retention';
+                $job['message']            = __( 'Local-copy policy complete. Applying retention.', 'clone-master' );
+                break;
+
+            case 'retention':
+                $this->apply_retention();
+                $job['finalization_stage'] = 'history';
+                $job['message']            = __( 'Retention complete. Recording the result.', 'clone-master' );
+                break;
+
+            case 'history':
+                $job['entry']['status']       = 'success';
+                $job['entry']['finished_at']  = gmdate( 'Y-m-d H:i:s' );
+                $job['entry']['duration_sec'] = max( 0, time() - (int) $job['created_at'] );
+                WPCM_Backup_Settings::add_history_entry( $job['entry'] );
+                $job['finalization_stage'] = 'notification';
+                $job['message']            = __( 'Backup recorded. Sending notification if configured.', 'clone-master' );
+                break;
+
+            case 'notification':
+                // Mark the notification as claimed before sending. This prevents
+                // duplicate email after process death, at the cost of a very small
+                // at-most-once window between this durable write and wp_mail().
+                if ( empty( $job['notification_claimed'] ) ) {
+                    $job['notification_claimed'] = true;
+                    $job['updated_at']            = time();
+                    $this->write_job( $job );
+                    $this->send_notification( $job['entry'] );
+                }
+                $job['stage']    = 'complete';
+                $job['progress'] = 100;
+                $job['message']  = __( 'Backup complete.', 'clone-master' );
+                break;
+
+            default:
+                throw new RuntimeException( __( 'The persisted finalization state is invalid.', 'clone-master' ) );
+        }
+
+        $job['updated_at'] = time();
+        $this->write_job( $job );
+        return $job;
+    }
+
+    /**
+     * Verify and atomically apply the automatic filename prefix.
+     *
+     * @param array $job Job state.
+     * @return array
+     */
+    private function finalize_local_archive( array $job ): array {
+        $filename = sanitize_file_name( (string) ( $job['package']['filename'] ?? '' ) );
+        $expected = strtolower( (string) ( $job['package']['sha256'] ?? '' ) );
+        if ( '' === $filename || ! preg_match( '/^[a-zA-Z0-9._-]+\.wpcm$/', $filename ) ) {
+            throw new RuntimeException( __( 'The exporter did not provide a valid package filename.', 'clone-master' ) );
+        }
+
+        $target_name = $filename;
+        if ( 'auto' === $job['trigger'] ) {
+            if ( preg_match( '/^(.+)-backup-manual-(.+)\.wpcm$/', $filename, $matches ) ) {
+                $target_name = $matches[1] . '-backup-auto-' . $matches[2] . '.wpcm';
+            } elseif ( 0 !== strpos( $filename, 'auto_' ) ) {
+                // Backward compatibility for a legacy package resumed after update.
+                $target_name = 'auto_' . $filename;
+            }
+        }
+        $source_path = WPCM_BACKUP_DIR . $filename;
+        $target_path = WPCM_BACKUP_DIR . $target_name;
+
+        if ( $source_path !== $target_path ) {
+            if ( is_file( $target_path ) && ! is_file( $source_path ) ) {
+                // A previous request completed the rename before persisting state.
+            } elseif ( is_file( $source_path ) && ! is_file( $target_path ) ) {
+                if ( ! @rename( $source_path, $target_path ) ) {
+                    throw new RuntimeException( __( 'Unable to atomically label the automatic backup.', 'clone-master' ) );
+                }
+            } elseif ( is_file( $source_path ) && is_file( $target_path ) ) {
+                throw new RuntimeException( __( 'Both source and target backup filenames exist; refusing an ambiguous publication.', 'clone-master' ) );
+            } else {
+                throw new RuntimeException( __( 'The published backup archive is missing.', 'clone-master' ) );
+            }
+        }
+
+        if ( ! is_file( $target_path ) || ! WPCM_Reliability::path_is_within( $target_path, WPCM_BACKUP_DIR ) ) {
+            throw new RuntimeException( __( 'The final archive path failed containment validation.', 'clone-master' ) );
+        }
+
+        $actual = WPCM_Reliability::checksum( $target_path );
+        if ( $expected && ! hash_equals( $expected, strtolower( $actual ) ) ) {
+            throw new RuntimeException( __( 'The final archive checksum no longer matches the verified package.', 'clone-master' ) );
+        }
+
+        try {
+            $inspection = WPCM_Archive::inspect( $target_path );
+        } catch ( Throwable $error ) {
+            throw new RuntimeException( __( 'The final WPCM container failed its integrity check.', 'clone-master' ) );
+        }
+        if ( ! hash_equals( strtolower( $actual ), strtolower( (string) $inspection['file_sha256'] ) ) ) {
+            throw new RuntimeException( __( 'The final WPCM checksum differs from its verified container hash.', 'clone-master' ) );
+        }
+
+        WPCM_Reliability::atomic_write( $target_path . '.sha256', strtolower( $actual ) . "\n", 0640 );
+        if ( $source_path !== $target_path ) {
+            foreach ( array( $source_path . '.sha256', $source_path . '.sha256.bak' ) as $stale_sidecar ) {
+                if ( is_file( $stale_sidecar ) && WPCM_Reliability::path_is_within( $stale_sidecar, WPCM_BACKUP_DIR ) ) {
+                    wp_delete_file( $stale_sidecar );
+                }
+            }
+        }
+
+        $job['package']['filename']       = $target_name;
+        $job['package']['sha256']         = $actual;
+        $job['entry']['filename']         = $target_name;
+        $job['entry']['size_bytes']       = (int) filesize( $target_path );
+        $job['entry']['archive_sha256']   = $actual;
+        $job['progress']                  = 97;
+        return $job;
+    }
+
+    /**
+     * Finish a successful job and remove only its small scheduler state.
+     *
+     * @param array $job Job state.
+     * @return array
+     */
+    private function complete_job( array $job ): array {
+        $this->clear_hook( self::CONTINUE_HOOK );
+        $this->delete_job();
+        return array(
+            'status'   => 'success',
+            'run_id'   => (string) $job['run_id'],
+            'filename' => (string) ( $job['entry']['filename'] ?? '' ),
+            'size'     => size_format( (int) ( $job['entry']['size_bytes'] ?? 0 ) ),
+            'duration' => (int) ( $job['entry']['duration_sec'] ?? 0 ),
+            'progress' => 100,
+        );
+    }
+
+    /**
+     * Record a failed job idempotently and clear its scheduler state.
+     *
+     * @param Throwable $error Failure.
+     * @return array
+     */
+    private function fail_job( Throwable $error ): array {
+        $job = $this->read_job();
+        if ( ! is_array( $job ) ) {
+            return array(
+                'status'  => 'error',
+                'message' => $error->getMessage(),
+            );
+        }
+
+        $entry                 = is_array( $job['entry'] ?? null ) ? $job['entry'] : array();
+        $entry['id']           = (string) ( $job['run_id'] ?? gmdate( 'Ymd_His' ) );
+        $entry['trigger']      = (string) ( $job['trigger'] ?? 'auto' );
+        $entry['status']       = 'error';
+        $entry['error']        = sanitize_text_field( $error->getMessage() );
+        $entry['finished_at']  = gmdate( 'Y-m-d H:i:s' );
+        $entry['duration_sec'] = max( 0, time() - (int) ( $job['created_at'] ?? time() ) );
+        $entry['filename']     = (string) ( $entry['filename'] ?? '' );
+        $entry['size_bytes']   = (int) ( $entry['size_bytes'] ?? 0 );
+
+        WPCM_Backup_Settings::add_history_entry( $entry );
+        if ( empty( $job['failure_notification_claimed'] ) ) {
+            $job['failure_notification_claimed'] = true;
+            $job['entry']                        = $entry;
+            $job['updated_at']                   = time();
+            $this->write_job( $job );
+            $this->send_notification( $entry );
+        }
+
+        $this->clear_hook( self::CONTINUE_HOOK );
+        $this->delete_job();
+        return array(
+            'status'  => 'error',
+            'run_id'  => (string) $entry['id'],
+            'message' => $entry['error'],
+        );
+    }
+
+    /**
+     * Apply automatic-backup retention. Manual archives are never removed.
+     *
+     * @return void
      */
     public function apply_retention(): void {
-        if ( ! is_dir( WPCM_BACKUP_DIR ) ) return;
+        if ( ! is_dir( WPCM_BACKUP_DIR ) ) {
+            return;
+        }
 
-        $auto_files = glob( WPCM_BACKUP_DIR . 'auto_*.zip' );
-        if ( empty( $auto_files ) ) return;
+        $domain_first = glob( WPCM_BACKUP_DIR . '*-backup-auto-*.wpcm' );
+        $legacy       = glob( WPCM_BACKUP_DIR . 'auto_*.wpcm' );
+        $files        = array_values(
+            array_unique(
+                array_merge(
+                    is_array( $domain_first ) ? $domain_first : array(),
+                    is_array( $legacy ) ? $legacy : array()
+                )
+            )
+        );
+        if ( empty( $files ) ) {
+            return;
+        }
 
-        // Sort by modification time, oldest last
-        usort( $auto_files, fn( $a, $b ) => filemtime( $b ) - filemtime( $a ) );
+        usort(
+            $files,
+            static function ( $a, $b ) {
+                return (int) filemtime( $b ) <=> (int) filemtime( $a );
+            }
+        );
 
-        $s    = $this->settings;
-        $mode = $s->retention_mode;
-
-        if ( $mode === 'count' ) {
-            $keep = max( 1, (int) $s->retention_count );
-            $to_delete = array_slice( $auto_files, $keep );
-
-        } elseif ( $mode === 'days' ) {
-            $days     = max( 1, (int) $s->retention_days );
-            $cutoff   = time() - ( $days * DAY_IN_SECONDS );
-            $to_delete = array_filter( $auto_files, fn( $f ) => filemtime( $f ) < $cutoff );
-
+        if ( 'count' === $this->settings->retention_mode ) {
+            $to_delete = array_slice( $files, max( 1, (int) $this->settings->retention_count ) );
+        } elseif ( 'days' === $this->settings->retention_mode ) {
+            $cutoff    = time() - ( max( 1, (int) $this->settings->retention_days ) * DAY_IN_SECONDS );
+            $to_delete = array_filter(
+                $files,
+                static function ( $file ) use ( $cutoff ) {
+                    return filemtime( $file ) < $cutoff;
+                }
+            );
         } else {
             return;
         }
 
-        $real_base = realpath( WPCM_BACKUP_DIR );
         foreach ( $to_delete as $file ) {
-            $real = realpath( $file );
-            // Security: ensure the file is strictly inside the backup dir
-            if ( $real && strpos( $real, $real_base ) === 0 ) {
-                @wp_delete_file( $file );
+            if ( is_file( $file ) && WPCM_Reliability::path_is_within( $file, WPCM_BACKUP_DIR ) ) {
+                wp_delete_file( $file );
+                foreach ( array( $file . '.sha256', $file . '.sha256.bak' ) as $sidecar ) {
+                    if ( is_file( $sidecar ) && WPCM_Reliability::path_is_within( $sidecar, WPCM_BACKUP_DIR ) ) {
+                        wp_delete_file( $sidecar );
+                    }
+                }
             }
         }
     }
 
-    // =========================================================================
-    // Notifications
-    // =========================================================================
-
     /**
-     * Sends an email notification based on the 'notify_on' setting.
+     * Send the configured completion email.
      *
-     * @param array $entry History entry (see WPCM_Backup_Settings::add_history_entry)
+     * @param array $entry History entry.
+     * @return void
      */
     public function send_notification( array $entry ): void {
         $notify_on = $this->settings->notify_on;
+        if ( 'never' === $notify_on || ( 'error' === $notify_on && 'error' !== $entry['status'] ) ) {
+            return;
+        }
 
-        if ( $notify_on === 'never' ) return;
-        if ( $notify_on === 'error' && $entry['status'] !== 'error' ) return;
+        $recipient = $this->settings->notify_email ?: get_option( 'admin_email' );
+        $site      = get_bloginfo( 'name' );
+        $trigger   = 'auto' === $entry['trigger'] ? __( 'automatic', 'clone-master' ) : __( 'manual', 'clone-master' );
 
-        $to      = $this->settings->notify_email ?: get_option( 'admin_email' );
-        $site    = get_bloginfo( 'name' );
-        $trigger = $entry['trigger'] === 'auto' ? __( 'automatic', 'clone-master' ) : __( 'manual', 'clone-master' );
-
-        if ( $entry['status'] === 'success' ) {
+        if ( 'success' === $entry['status'] ) {
             $subject = sprintf(
-				/* translators: 1: site name, 2: backup type (automatic/manual) */
-				__( '[%1$s] %2$s backup successful', 'clone-master' ),
-				$site, $trigger
-			);
-            $body    = sprintf(
-                /* translators: 1: backup type, 2: site name, 3: filename, 4: file size, 5: duration in seconds, 6: start datetime, 7: end datetime */
-				__( "Good news!\n\nThe %1\$s backup of \"%2\$s\" completed successfully.\n\n  File      : %3\$s\n  Size      : %4\$s\n  Duration  : %5\$d seconds\n  Started   : %6\$s\n  Finished  : %7\$s\n\nYou can download or manage your backups from the WordPress dashboard.\n\n— Clone Master", 'clone-master' ),
+                /* translators: 1: site name, 2: backup type. */
+                __( '[%1$s] %2$s backup successful', 'clone-master' ),
+                $site,
+                $trigger
+            );
+            $body = sprintf(
+                /* translators: 1: backup type, 2: site name, 3: filename, 4: size, 5: duration, 6: started, 7: finished. */
+                __( "Good news!\n\nThe %1\$s backup of \"%2\$s\" completed successfully.\n\nFile: %3\$s\nSize: %4\$s\nDuration: %5\$d seconds\nStarted: %6\$s\nFinished: %7\$s\n\n: Clone Master", 'clone-master' ),
                 $trigger,
                 $site,
-                $entry['filename'],
+                (string) $entry['filename'],
                 size_format( (int) $entry['size_bytes'] ),
                 (int) $entry['duration_sec'],
-                $entry['started_at'],
-                $entry['finished_at']
+                (string) $entry['started_at'],
+                (string) $entry['finished_at']
             );
         } else {
             $subject = sprintf(
-				/* translators: 1: site name, 2: backup type (automatic/manual) */
-				__( '[%1$s] %2$s backup FAILED', 'clone-master' ),
-				$site, $trigger
-			);
-            $body    = sprintf(
-                /* translators: 1: backup type, 2: site name, 3: error message, 4: start datetime, 5: end datetime */
-				__( "The %1\$s backup of \"%2\$s\" failed.\n\n  Error     : %3\$s\n  Started   : %4\$s\n  Finished  : %5\$s\n\nCheck your WP-Cron logs and write permissions on the backup directory.\n\n— Clone Master", 'clone-master' ),
+                /* translators: 1: site name, 2: backup type. */
+                __( '[%1$s] %2$s backup FAILED', 'clone-master' ),
+                $site,
+                $trigger
+            );
+            $body = sprintf(
+                /* translators: 1: backup type, 2: site name, 3: error, 4: started, 5: finished. */
+                __( "The %1\$s backup of \"%2\$s\" failed.\n\nError: %3\$s\nStarted: %4\$s\nFinished: %5\$s\n\n: Clone Master", 'clone-master' ),
                 $trigger,
                 $site,
-                $entry['error'] ?? __( 'Unknown error', 'clone-master' ),
-                $entry['started_at'],
-                $entry['finished_at']
+                (string) ( $entry['error'] ?? __( 'Unknown error', 'clone-master' ) ),
+                (string) ( $entry['started_at'] ?? '' ),
+                (string) ( $entry['finished_at'] ?? '' )
             );
         }
 
-        wp_mail( $to, $subject, $body );
+        wp_mail( $recipient, $subject, $body );
     }
 
-    // =========================================================================
-    // Accessors
-    // =========================================================================
-
     /**
-     * Reloads settings from DB — useful after a save() call.
+     * Reload settings after an administrator save.
+     *
+     * @return void
      */
     public function reload_settings(): void {
         $this->settings = new WPCM_Backup_Settings();
     }
 
+    /**
+     * Return current settings.
+     *
+     * @return WPCM_Backup_Settings
+     */
     public function get_settings(): WPCM_Backup_Settings {
         return $this->settings;
+    }
+
+    /**
+     * Persist the job state atomically with HMAC authentication.
+     *
+     * @param array $job Job state.
+     * @return void
+     */
+    private function write_job( array $job ): void {
+        WPCM_Reliability::atomic_signed_json( $this->job_path(), $job, self::JOB_CONTEXT );
+    }
+
+    /**
+     * Read the job state with authenticated backup-file fallback.
+     *
+     * @return array|null
+     */
+    private function read_job(): ?array {
+        $job = WPCM_Reliability::read_signed_json( $this->job_path(), self::JOB_CONTEXT );
+        return is_array( $job ) ? $job : null;
+    }
+
+    /**
+     * Remove scheduler state after terminal completion.
+     *
+     * @return void
+     */
+    private function delete_job(): void {
+        foreach ( array( $this->job_path(), $this->job_path() . '.bak' ) as $path ) {
+            if ( is_file( $path ) ) {
+                wp_delete_file( $path );
+            }
+        }
+    }
+
+    /**
+     * Schedule a continuation unless one is already pending.
+     *
+     * @param int $delay Delay in seconds.
+     * @return void
+     */
+    private function schedule_continuation( int $delay = 30 ): void {
+        if ( ! wp_next_scheduled( self::CONTINUE_HOOK ) ) {
+            wp_schedule_single_event( time() + max( 1, $delay ), self::CONTINUE_HOOK );
+        }
+    }
+
+    /**
+     * Clear every event for a hook, including duplicate scheduled rows.
+     *
+     * @param string $hook Hook name.
+     * @return void
+     */
+    private function clear_hook( string $hook ): void {
+        wp_clear_scheduled_hook( $hook );
+    }
+
+    /** @return string */
+    private function job_path(): string {
+        return WPCM_TEMP_DIR . 'scheduled-backup-state.json';
+    }
+
+    /** @return string */
+    private function job_lock_path(): string {
+        return WPCM_TEMP_DIR . 'scheduled-backup-state.lock';
     }
 }

@@ -1,0 +1,612 @@
+{
+  "translation-revision-date": "2026-07-25T17:14:00.237657+00:00",
+  "generator": "clone-master-i18n",
+  "source": "clone-master",
+  "domain": "messages",
+  "locale_data": {
+    "messages": {
+      "": {
+        "domain": "messages",
+        "lang": "fr_FR",
+        "plural-forms": "nplurals=2; plural=(n > 1);"
+      },
+      "ABSPATH": [
+        "Chemin ABSPATH"
+      ],
+      "Accepted format: .wpcm : or click to browse": [
+        "Format accepté : .wpcm : ou cliquez pour parcourir"
+      ],
+      "Actions": [
+        "Actions"
+      ],
+      "Active plugins": [
+        "Extensions actives"
+      ],
+      "Active theme": [
+        "Thème actif"
+      ],
+      "Activity log": [
+        "Journal d'activité"
+      ],
+      "Adaptive batch:": [
+        "Lot adaptatif :"
+      ],
+      "Advanced options": [
+        "Options avancées"
+      ],
+      "All occurrences of the old URL will be replaced in the database.": [
+        "Toutes les occurrences de l'ancienne URL seront remplacées dans la base de données."
+      ],
+      "All your archives are listed here. Download them for safekeeping or restore them directly on this site.": [
+        "Toutes vos archives sont listées ici. Téléchargez-les pour les conserver ou restaurez-les directement sur ce site."
+      ],
+      "An error occurred": [
+        "Une erreur est survenue"
+      ],
+      "Analysing archive…": [
+        "Analyse de l'archive…"
+      ],
+      "Analysing backup…": [
+        "Analyse de la sauvegarde…"
+      ],
+      "Analyze archive": [
+        "Analyser l’archive"
+      ],
+      "Archive received successfully.": [
+        "Archive reçue avec succès."
+      ],
+      "Archive source": [
+        "Archive source"
+      ],
+      "Asks Google & Bing not to index this site (WordPress \"Discourage search engines\" option). Recommended during post-migration validation : uncheck once verified.": [
+        "Demande à Google & Bing de ne pas indexer ce site (option WordPress \"Décourager les moteurs de recherche\"). Recommandé pendant la validation post-migration : à décocher une fois validé."
+      ],
+      "Backup complete.": [
+        "Sauvegarde terminée."
+      ],
+      "Backup created successfully.": [
+        "Sauvegarde créée avec succès."
+      ],
+      "Backup, migration and restore for your WordPress site": [
+        "Sauvegarde, migration et restauration de votre site WordPress"
+      ],
+      "Backups": [
+        "Sauvegardes"
+      ],
+      "Cancel": [
+        "Annuler"
+      ],
+      "Check the information and configure the options before starting the restore.": [
+        "Vérifiez les informations et configurez les options avant de lancer la restauration."
+      ],
+      "Check the settings and configure the options before starting the restore.": [
+        "Vérifiez les réglages et configurez les options avant de lancer la restauration."
+      ],
+      "Chunk size": [
+        "Taille de chunk"
+      ],
+      "Chunked upload of ": [
+        "Envoi découpé de "
+      ],
+      "Click to choose a different file": [
+        "Cliquez pour choisir un autre fichier"
+      ],
+      "Collapse": [
+        "Réduire"
+      ],
+      "Complete backup of your site": [
+        "Sauvegarde complète de votre site"
+      ],
+      "Created on": [
+        "Créée le"
+      ],
+      "Creates a complete archive of your WordPress installation, ready to migrate or store safely.": [
+        "Crée une archive complète de votre installation WordPress, prête à migrer ou à conserver en toute sécurité."
+      ],
+      "Current table:": [
+        "Table en cours :"
+      ],
+      "Database": [
+        "Base de données"
+      ],
+      "Database export complete.": [
+        "Export de la base de données terminé."
+      ],
+      "Database tables": [
+        "Tables de la base de données"
+      ],
+      "Date": [
+        "Date"
+      ],
+      "Default": [
+        "Simple"
+      ],
+      "Delete": [
+        "Supprimer"
+      ],
+      "Deletes cached rewrite rules : WordPress will regenerate them on first load.": [
+        "Supprime les règles de réécriture mises en cache : WordPress les recréera au premier chargement."
+      ],
+      "Destination URL": [
+        "URL de destination"
+      ],
+      "Directory permissions": [
+        "Permissions des répertoires"
+      ],
+      "Download": [
+        "Télécharger"
+      ],
+      "Download archive": [
+        "Télécharger l'archive"
+      ],
+      "Drop your .wpcm file or click to select it. Large files are sent in parts to work around server limits.": [
+        "Déposez votre fichier .wpcm ou cliquez pour le sélectionner. Les fichiers volumineux sont envoyés en plusieurs parties pour contourner les limites du serveur."
+      ],
+      "Drop your archive here": [
+        "Déposez votre archive ici"
+      ],
+      "Elapsed time:": [
+        "Temps écoulé :"
+      ],
+      "Empty response : server may have timed out. ": [
+        "Réponse vide : le serveur a peut-être expiré. "
+      ],
+      "Error: ": [
+        "Erreur : "
+      ],
+      "Execution time": [
+        "Temps d'exécution"
+      ],
+      "Export": [
+        "Exporter"
+      ],
+      "Export your site": [
+        "Exporter votre site"
+      ],
+      "Failed to load server information.": [
+        "Impossible de charger les informations serveur."
+      ],
+      "Fatal PHP error detected. ": [
+        "Erreur PHP fatale détectée. "
+      ],
+      "File": [
+        "Fichier"
+      ],
+      "Free disk space": [
+        "Espace libre"
+      ],
+      "HTTP 413 : initial chunk reduced to ": [
+        "HTTP 413 : taille du premier morceau réduite à "
+      ],
+      "Hide site from search engines": [
+        "Masquer le site aux moteurs de recherche"
+      ],
+      "Installer error on step ": [
+        "Erreur de l’installeur à l’étape "
+      ],
+      "Installer ready.": [
+        "Installeur prêt."
+      ],
+      "Insufficient PHP memory. ": [
+        "Mémoire PHP insuffisante. "
+      ],
+      "Insufficient memory. ": [
+        "Mémoire insuffisante. "
+      ],
+      "Invalid response on step ": [
+        "Réponse invalide à l’étape "
+      ],
+      "Leave as-is if restoring on the same domain.": [
+        "Laissez tel quel si vous restaurez sur le même domaine."
+      ],
+      "Local storage": [
+        "Stockage local"
+      ],
+      "Log back into WordPress to verify everything is working correctly.": [
+        "Reconnectez-vous à WordPress pour vérifier que tout fonctionne correctement."
+      ],
+      "Maximum upload": [
+        "Taille maximale d’envoi"
+      ],
+      "Media": [
+        "Médias"
+      ],
+      "Migration completed successfully.": [
+        "Migration terminée avec succès."
+      ],
+      "Network error on step ": [
+        "Erreur réseau à l’étape "
+      ],
+      "Network error: ": [
+        "Erreur réseau : "
+      ],
+      "New backup": [
+        "Nouvelle sauvegarde"
+      ],
+      "New restore": [
+        "Nouvelle restauration"
+      ],
+      "New site URL": [
+        "Nouvelle URL du site"
+      ],
+      "No": [
+        "Non"
+      ],
+      "No backups available. Run an export to create one.": [
+        "Aucune sauvegarde disponible. Lancez une exportation pour en créer une."
+      ],
+      "Not writable": [
+        "Non accessible en écriture"
+      ],
+      "Origin": [
+        "Origine"
+      ],
+      "PHP Extensions": [
+        "Extensions PHP"
+      ],
+      "PHP execution time exceeded. ": [
+        "Délai PHP dépassé. "
+      ],
+      "PHP memory": [
+        "Mémoire PHP"
+      ],
+      "Permalink structure": [
+        "Structure des permaliens"
+      ],
+      "Permanently delete this backup?": [
+        "Supprimer définitivement cette sauvegarde ?"
+      ],
+      "Preparing installer…": [
+        "Préparation de l'installeur…"
+      ],
+      "Processing : please do not close this page.": [
+        "Traitement en cours : veuillez ne pas fermer cette page."
+      ],
+      "Processing, please wait…": [
+        "Traitement en cours, veuillez patienter…"
+      ],
+      "Reading backup…": [
+        "Lecture de la sauvegarde…"
+      ],
+      "Recommended after every restore.": [
+        "Recommandé après chaque restauration."
+      ],
+      "Refresh": [
+        "Actualiser"
+      ],
+      "Regenerate permalinks": [
+        "Régénérer les permaliens"
+      ],
+      "Restore": [
+        "Restaurer"
+      ],
+      "Restore complete.": [
+        "Restauration terminée."
+      ],
+      "Restore or migrate your site": [
+        "Restaurer ou migrer votre site"
+      ],
+      "Restore settings": [
+        "Paramètres de restauration"
+      ],
+      "Restore this backup": [
+        "Restaurer cette sauvegarde"
+      ],
+      "Restoring…": [
+        "Restauration en cours…"
+      ],
+      "Retrying in ": [
+        "Nouvelle tentative dans "
+      ],
+      "Security check failed (session expired?). Reload the page and try again.": [
+        "La vérification de sécurité a échoué (session expirée ?). Rechargez la page et réessayez."
+      ],
+      "Select an archive": [
+        "Sélectionner une archive"
+      ],
+      "Sending archive directly (": [
+        "Envoi direct de l'archive ("
+      ],
+      "Server": [
+        "Serveur"
+      ],
+      "Server error without detail": [
+        "Erreur serveur sans détail"
+      ],
+      "Server limits": [
+        "Limites serveur"
+      ],
+      "Show": [
+        "Afficher"
+      ],
+      "Site URL": [
+        "URL du site"
+      ],
+      "Size": [
+        "Taille"
+      ],
+      "Source URL": [
+        "URL source"
+      ],
+      "Start full export": [
+        "Lancer la sauvegarde"
+      ],
+      "Start restore": [
+        "Lancer la restauration"
+      ],
+      "Support open-source": [
+        "Soutenir l'open-source"
+      ],
+      "Table count": [
+        "Nombre de tables"
+      ],
+      "Table prefix": [
+        "Préfixe des tables"
+      ],
+      "Tables exported": [
+        "Tables exportées"
+      ],
+      "The authenticated database cursor did not advance after several requests. The export was stopped safely. Start a new backup; if the problem persists, inspect the diagnostic details rather than repeatedly purging caches.": [
+        "Le curseur de base de données authentifié n’a pas avancé après plusieurs requêtes. L’export a été arrêté en sécurité. Démarrez une nouvelle sauvegarde ; si le problème persiste, consultez les diagnostics plutôt que de purger les caches à répétition."
+      ],
+      "The migration is complete. Please log back into the WordPress admin to verify everything is working correctly.": [
+        "La migration est terminée. Reconnectez-vous à l'interface d'administration WordPress pour vérifier que tout fonctionne."
+      ],
+      "The server rejected a chunk after the upload session started. Restart the upload after increasing the server upload limit.": [
+        "Le serveur a rejeté un morceau après le démarrage de la session. Recommencez l’envoi après avoir augmenté la limite d’envoi du serveur."
+      ],
+      "The server returned an empty success payload.": [
+        "Le serveur a renvoyé une réponse de succès vide."
+      ],
+      "The server returned an unexpected response. ": [
+        "Le serveur a renvoyé une réponse inattendue. "
+      ],
+      "Timeout : the server may still be processing.": [
+        "Délai dépassé : le serveur traite peut-être encore la demande."
+      ],
+      "Unexpected response: ": [
+        "Réponse inattendue : "
+      ],
+      "Unknown error": [
+        "Erreur inconnue"
+      ],
+      "Upload a Clone Master archive to restore your site on this host. All URLs are replaced automatically, including in serialised data.": [
+        "Chargez une archive Clone Master pour restaurer votre site sur cet hébergement. Toutes les URLs sont remplacées automatiquement, y compris dans les données sérialisées."
+      ],
+      "Upload complete": [
+        "Envoi terminé"
+      ],
+      "Uploading archive…": [
+        "Envoi de l'archive…"
+      ],
+      "Uploading : please do not close this page.": [
+        "Envoi en cours : veuillez ne pas fermer cette page."
+      ],
+      "WordPress details": [
+        "Détails WordPress"
+      ],
+      "WordPress version": [
+        "Version de WordPress"
+      ],
+      "Writable": [
+        "Accessible en écriture"
+      ],
+      "Yes": [
+        "Oui"
+      ],
+      "Your backups": [
+        "Vos sauvegardes"
+      ],
+      "Your database, themes, plugins, media and configuration files are securely archived. You can then restore them on any host.": [
+        "Votre base de données, vos thèmes, extensions, médias et fichiers de configuration sont archivés de façon sécurisée. Vous pouvez ensuite les restaurer sur n'importe quel hébergement."
+      ],
+      "Your site has been restored successfully!": [
+        "Votre site a été restauré avec succès !"
+      ],
+      "calls": [
+        "appels"
+      ],
+      "complete": [
+        "terminé"
+      ],
+      "rows/call": [
+        "lignes/appel"
+      ],
+      "wp-content dir": [
+        "Dossier wp-content"
+      ],
+      "← Start over": [
+        "← Recommencer"
+      ],
+      "A PHP fatal error was detected.": [
+        "Une erreur PHP fatale a été détectée."
+      ],
+      "Action": [
+        "Action"
+      ],
+      "All": [
+        "Tous"
+      ],
+      "Another Clone Master operation is already running.": [
+        "Une autre opération Clone Master est déjà en cours."
+      ],
+      "Archive upload and validation in progress": [
+        "Envoi et validation de l'archive en cours"
+      ],
+      "Backup in progress": [
+        "Sauvegarde en cours"
+      ],
+      "Clear log": [
+        "Effacer le journal"
+      ],
+      "Clear the persistent diagnostic log?": [
+        "Effacer le journal de diagnostic persistant ?"
+      ],
+      "Clone Master records each critical transition, caught PHP error, fatal shutdown and unexpected browser response. Secrets are redacted automatically.": [
+        "Clone Master enregistre chaque transition critique, erreur PHP interceptée, arrêt fatal et réponse inattendue du navigateur. Les secrets sont masqués automatiquement."
+      ],
+      "Clone Master sections": [
+        "Sections de Clone Master"
+      ],
+      "Diagnostic event": [
+        "Événement de diagnostic"
+      ],
+      "Diagnostic journal": [
+        "Journal de diagnostic"
+      ],
+      "Diagnostics": [
+        "Diagnostics"
+      ],
+      "Download report": [
+        "Télécharger le rapport"
+      ],
+      "Finish the current operation before starting another restore.": [
+        "Terminez l'opération actuelle avant de démarrer une autre restauration."
+      ],
+      "Installer error.": [
+        "Erreur de l'installeur."
+      ],
+      "Loading diagnostics...": [
+        "Chargement des diagnostics..."
+      ],
+      "Loading schedule settings...": [
+        "Chargement de la planification..."
+      ],
+      "Network error during restore: ": [
+        "Erreur réseau pendant la restauration : "
+      ],
+      "Network error.": [
+        "Erreur réseau."
+      ],
+      "No diagnostic event matches this filter.": [
+        "Aucun événement de diagnostic ne correspond à ce filtre."
+      ],
+      "Open Diagnostics to inspect the captured response.": [
+        "Ouvrez Diagnostics pour examiner la réponse capturée."
+      ],
+      "Open Diagnostics to view the captured response.": [
+        "Ouvrez Diagnostics pour consulter la réponse capturée."
+      ],
+      "Peak memory": [
+        "Pic mémoire"
+      ],
+      "Persistent production diagnostics": [
+        "Diagnostics persistants de production"
+      ],
+      "Reliable WPCM backups, staged restore and production diagnostics": [
+        "Sauvegardes WPCM fiables, restauration préparée et diagnostics de production"
+      ],
+      "Request": [
+        "Requête"
+      ],
+      "Schedule": [
+        "Planification"
+      ],
+      "Server error without detail.": [
+        "Erreur serveur sans détail."
+      ],
+      "The PHP execution time was exceeded.": [
+        "Le temps d'exécution PHP a été dépassé."
+      ],
+      "The PHP memory limit was exceeded.": [
+        "La limite de mémoire PHP a été dépassée."
+      ],
+      "The WordPress security session expired. Reload the page and try again.": [
+        "La session de sécurité WordPress a expiré. Rechargez la page puis réessayez."
+      ],
+      "The current operation keeps running when you change tabs. Do not reload or close this page until it finishes.": [
+        "L'opération actuelle continue lorsque vous changez d'onglet. Ne rechargez pas et ne fermez pas cette page avant sa fin."
+      ],
+      "The installer returned an invalid response during step ": [
+        "L'installeur a renvoyé une réponse invalide pendant l'étape "
+      ],
+      "The response body was empty.": [
+        "Le corps de la réponse était vide."
+      ],
+      "The restore step timed out. The signed journal can resume the same step.": [
+        "L'étape de restauration a dépassé le délai. Le journal signé permet de reprendre la même étape."
+      ],
+      "The server rejected the upload size.": [
+        "Le serveur a refusé la taille de l'envoi."
+      ],
+      "The server returned an invalid JSON payload.": [
+        "Le serveur a renvoyé une charge JSON invalide."
+      ],
+      "The server returned an unexpected response.": [
+        "Le serveur a renvoyé une réponse inattendue."
+      ],
+      "The upload endpoint returned an invalid JSON payload.": [
+        "Le point d'envoi a renvoyé une charge JSON invalide."
+      ],
+      "The upload endpoint returned an invalid response.": [
+        "Le point d'envoi a renvoyé une réponse invalide."
+      ],
+      "Timeout: the server may still be processing.": [
+        "Délai dépassé : le serveur traite peut-être encore l'opération."
+      ],
+      "Transactional restore in progress": [
+        "Restauration transactionnelle en cours"
+      ],
+      "Server error.": [
+        "Erreur serveur."
+      ],
+      "The server returned an invalid response.": [
+        "Le serveur a renvoyé une réponse invalide."
+      ],
+      "A fatal PHP error interrupted the request. Open Diagnostics and use the event ID below.": [
+        "Une erreur PHP fatale a interrompu la requête. Ouvrez Diagnostics et utilisez l’identifiant d’événement ci-dessous."
+      ],
+      "Diagnostic log cleared.": [
+        "Journal de diagnostic effacé."
+      ],
+      "JavaScript is required for resumable backup and restore operations.": [
+        "JavaScript est requis pour les opérations de sauvegarde et de restauration reprenables."
+      ],
+      "Loading interface...": [
+        "Chargement de l'interface..."
+      ],
+      "Loading the backup and restore workspace...": [
+        "Chargement de l'espace de sauvegarde et de restauration..."
+      ],
+      "Unable to encode database credentials for encrypted installer preparation.": [
+        "Impossible d'encoder les identifiants de base de données pour préparer l'installeur chiffré."
+      ],
+      "Unable to encode the automatic recovery key envelope.": [
+        "Impossible d'encoder l'enveloppe de la clé de récupération automatique."
+      ],
+      "Unable to encode the transactional installer configuration.": [
+        "Impossible d'encoder la configuration de l'installeur transactionnel."
+      ],
+      "WordPress could not determine the authenticated admin origin.": [
+        "WordPress n'a pas pu déterminer l'origine authentifiée de l'administration."
+      ],
+      "WordPress could not resolve the uploads directory for the restore plan.": [
+        "WordPress n'a pas pu déterminer le répertoire des médias pour le plan de restauration."
+      ],
+      "WordPress database context is unavailable during installer preparation.": [
+        "Le contexte de base de données WordPress est indisponible pendant la préparation de l'installeur."
+      ],
+      "Operation in progress": [
+        "Opération en cours"
+      ],
+      "View diagnostics": [
+        "Voir les diagnostics"
+      ],
+      "A React interface component failed to render.": [
+        "Un composant de l'interface React n'a pas pu s'afficher."
+      ],
+      "Open diagnostics": [
+        "Ouvrir les diagnostics"
+      ],
+      "Reload interface": [
+        "Recharger l'interface"
+      ],
+      "Retry this section": [
+        "Réessayer cette section"
+      ],
+      "This section encountered an interface error": [
+        "Cette section a rencontré une erreur d'interface"
+      ]
+    }
+  }
+}
