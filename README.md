@@ -45,31 +45,6 @@ Depuis l’administration WordPress, il permet de :
 > [!IMPORTANT]
 > Une sauvegarde ne doit pas rester uniquement sur le serveur qui héberge le site. Téléchargez le fichier `.wpcm` et conservez au moins une copie sur un autre support.
 
----
-
-## Pour qui ?
-
-Clone Master a été pensé pour les personnes qui utilisent WordPress sans vouloir manipuler :
-
-- phpMyAdmin ;
-- FTP ou SFTP ;
-- SSH ;
-- des commandes SQL ;
-- des archives découpées manuellement ;
-- des scripts de remplacement d’URL.
-
-Il convient notamment :
-
-- aux propriétaires de sites WordPress ;
-- aux indépendants ;
-- aux petites entreprises ;
-- aux agences qui gèrent plusieurs sites ;
-- aux personnes qui changent d’hébergeur ;
-- aux utilisateurs qui veulent tester une restauration avant une intervention importante.
-
-Aucune connaissance en développement n’est nécessaire pour créer ou importer une sauvegarde.
-
----
 
 ## Pourquoi Clone Master ?
 
@@ -85,15 +60,6 @@ Cette méthode peut suffire lorsque tout se déroule parfaitement. Elle devient 
 - le remplacement des fichiers ;
 - la bascule finale.
 
-Clone Master ne cherche pas seulement à fabriquer un fichier téléchargeable.
-
-Il cherche à répondre à une question plus importante :
-
-> **Le site peut-il être restauré de manière cohérente même si une étape est interrompue ?**
-
-Pour cela, le moteur contrôle chaque phase avant de toucher au site actif.
-
----
 
 ## Créer sa première sauvegarde
 
