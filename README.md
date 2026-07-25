@@ -321,7 +321,7 @@ Aucun placeholder temporaire non restauré ne doit rester enregistré dans la ba
 
 ---
 
-# Conçu pour les hébergements WordPress réels
+# Conçu pour les hébergements WordPress
 
 Construire un moteur fiable dans un environnement de test contrôlé est une première étape.
 
