@@ -21,7 +21,6 @@
 [Première sauvegarde](#créer-sa-première-sauvegarde) ·
 [Restaurer un site](#restaurer-ou-migrer-un-site) ·
 [Comprendre le moteur](#un-moteur-plus-rigoureux-quun-simple-zip) ·
-[FAQ](#questions-fréquentes)
 
 </div>
 
