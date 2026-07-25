@@ -4,7 +4,7 @@
 
 ### Sauvegarde, migration et restauration WordPress avec validation complète avant bascule
 
-**Une interface guidée pour les débutants. Un moteur de restauration conçu pour résister aux coupures, aux gros sites et aux hébergements WordPress réels.**
+**Un moteur de restauration conçu pour résister aux coupures, aux gros sites et aux hébergements WordPress.**
 
 <br>
 
