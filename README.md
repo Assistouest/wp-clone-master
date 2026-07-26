@@ -2,303 +2,244 @@
 
 # Clone Master
 
-### Sauvegarde, migration et restauration WordPress avec validation complète avant bascule
+### Sauvegarde, migration et restauration WordPress avec validation avant bascule
 
-**Un moteur de restauration conçu pour résister aux coupures, aux gros sites et aux hébergements WordPress.**
-
-<br>
-
-![WordPress](https://img.shields.io/badge/WordPress-plugin-21759B?logo=wordpress&logoColor=white)
-![PHP 8.5](https://img.shields.io/badge/PHP-8.5%20testé-777BB4?logo=php&logoColor=white)
-![nginx](https://img.shields.io/badge/nginx-testé-009639?logo=nginx&logoColor=white)
-![LiteSpeed](https://img.shields.io/badge/LiteSpeed-testé-E74430)
-![SHA-256](https://img.shields.io/badge/intégrité-SHA--256-2F81F7)
-![Format WPCM](https://img.shields.io/badge/format-.wpcm-8250DF)
+**Créez des archives `.wpcm` reprenables, préparez la restauration à l'écart du site actif et gardez une voie de récupération lorsque WordPress ne démarre plus.**
 
 <br>
 
-[Découvrir](#pourquoi-clone-master) ·
-[Première sauvegarde](#créer-sa-première-sauvegarde) ·
-[Restaurer un site](#restaurer-ou-migrer-un-site) ·
-[Comprendre le moteur](#un-moteur-plus-rigoureux-quun-simple-zip) ·
+![Version](https://img.shields.io/badge/version-3.2.7-4F46E5)
+![WordPress](https://img.shields.io/badge/WordPress-5.6%2B-21759B?logo=wordpress&logoColor=white)
+![PHP](https://img.shields.io/badge/PHP-7.4%2B-777BB4?logo=php&logoColor=white)
+![WP-CLI](https://img.shields.io/badge/WP--CLI-compatible-23282D?logo=wordpress&logoColor=white)
+![Format](https://img.shields.io/badge/format-WPCMARCHIVE2-8250DF)
+![License](https://img.shields.io/badge/license-GPL--2.0--or--later-22C55E)
+
+<br>
+
+[Comprendre le plugin](#pourquoi-clone-master) ·
+[Créer une sauvegarde](#créer-une-sauvegarde-wordpress) ·
+[Restaurer ou migrer](#restaurer-ou-migrer-un-site-wordpress) ·
+[Utiliser WP-CLI](#wp-cli-et-environnement-de-secours) ·
+[Signaler un problème](https://github.com/Assistouest/clone-master/issues)
 
 </div>
 
 ---
 
-## En une minute
+Clone Master est un plugin de sauvegarde WordPress conçu pour les migrations, les restaurations contrôlées et les situations dans lesquelles une opération peut être interrompue par le serveur, le navigateur ou le réseau.
 
-Clone Master regroupe le site WordPress dans une archive unique au format `.wpcm`.
+Le plugin exporte la base de données et le contenu du site dans une archive native `.wpcm`. Il vérifie les blocs écrits, reprend les opérations interrompues et prépare la restauration dans une zone temporaire avant de modifier les tables et fichiers utilisés par le site.
 
-Depuis l’administration WordPress, il permet de :
-
-| Besoin | Ce que fait Clone Master |
-|---|---|
-| Sauvegarder un site | Regroupe la base de données et les fichiers dans une archive contrôlée |
-| Changer d’hébergement | Prépare le site sur le nouveau serveur avant la bascule |
-| Changer de domaine | Remplace les URL dans les textes et les données sérialisées |
-| Reprendre un gros envoi | Repart du dernier bloc déjà reçu et vérifié |
-| Éviter un site à moitié restauré | Travaille d’abord dans une zone temporaire |
-| Revenir en arrière | Conserve l’ancien état jusqu’à la validation finale |
-| Comprendre une erreur | Produit un diagnostic détaillé avec un identifiant unique |
+<p align="center">
+  <img src="assets/screenshot-1.png" alt="Interface de sauvegarde WordPress de Clone Master" width="100%">
+</p>
 
 > [!IMPORTANT]
-> Une sauvegarde ne doit pas rester uniquement sur le serveur qui héberge le site. Téléchargez le fichier `.wpcm` et conservez au moins une copie sur un autre support.
+> Une sauvegarde conservée uniquement sur le serveur du site ne constitue pas une stratégie suffisante. Téléchargez chaque archive importante ou envoyez-la vers un stockage distinct, puis testez périodiquement son extraction ou sa restauration.
 
+## Pourquoi Clone Master
 
-## Pourquoi Clone Master ?
+Une restauration ne devrait pas commencer par écraser le site qu'elle est censée remettre en service.
 
-De nombreux outils reposent principalement sur un fichier ZIP accompagné d’un export SQL.
+Clone Master sépare la préparation de la bascule. L'archive est d'abord reçue et contrôlée, la base est importée sous un préfixe temporaire, les fichiers sont préparés sur le même système de fichiers et les remplacements d'URL sont appliqués avant la promotion finale. Le site en place reste disponible tant que les contrôles préalables ne sont pas terminés.
 
-Cette méthode peut suffire lorsque tout se déroule parfaitement. Elle devient plus fragile lorsqu’une coupure survient pendant :
+Cette approche répond à plusieurs problèmes fréquents des sauvegardes WordPress : les limites d'exécution PHP, les archives volumineuses, les connexions instables, les données sérialisées, les changements de domaine et les interruptions au moment le plus sensible d'une restauration.
 
-- la création de l’archive ;
-- son envoi ;
-- son extraction ;
-- l’import de la base ;
-- le remplacement des URL ;
-- le remplacement des fichiers ;
-- la bascule finale.
+| Besoin | Réponse apportée par Clone Master |
+|---|---|
+| Sauvegarder un site WordPress | Création d'une archive `.wpcm` contenant la base et les éléments pris en charge sous `wp-content/` |
+| Migrer vers un autre hébergement | Import dans une zone de préparation avant la bascule vers le site de destination |
+| Changer de domaine ou passer en HTTPS | Remplacement des URL dans les chaînes, le JSON et les données PHP sérialisées valides |
+| Reprendre une opération interrompue | États persistants, curseurs authentifiés et envois découpés reprenant au dernier point validé |
+| Contrôler une archive sans restaurer | Inspection, vérification complète et extraction disponibles dans WordPress, avec WP-CLI ou avec l'outil autonome |
+| Importer une sauvegarde pour plus tard | Mode **Store only** qui vérifie puis ajoute l'archive aux sauvegardes locales sans modifier le site |
+| Revenir à l'état précédent | Journal de bascule, contrôle de santé et rollback coordonné en cas d'échec final |
 
+## Créer une sauvegarde WordPress
 
-## Créer sa première sauvegarde
+Depuis l'administration, ouvrez **Clone Master**, consultez les informations du serveur puis lancez un export manuel. Le moteur traite la base et les fichiers par étapes afin de rester compatible avec les hébergements qui imposent des temps d'exécution courts.
 
-<table>
-<tr>
-<td width="33%" valign="top">
+Une fois l'archive publiée, elle est disponible dans le dossier local suivant :
 
-### 1. Ouvrir Clone Master
+```text
+wp-content/wpcm-backups/
+```
 
-Installez et activez le plugin, puis ouvrez **Clone Master** dans l’administration WordPress.
-
-</td>
-<td width="33%" valign="top">
-
-### 2. Lancer la sauvegarde
-
-Choisissez une sauvegarde manuelle et laissez l’interface suivre automatiquement les différentes étapes.
-
-</td>
-<td width="33%" valign="top">
-
-### 3. Télécharger le fichier
-
-Une fois l’opération terminée, téléchargez l’archive `.wpcm` et conservez-la hors du serveur.
-
-</td>
-</tr>
-</table>
-
-Le fichier obtenu porte un nom commençant par le domaine du site :
+Le nom du fichier indique le site, le type de sauvegarde et sa date de création :
 
 ```text
 monsite.fr-backup-manual-20260725T183500-a1b2c3d4e5f6.wpcm
-```
-
-Pour une sauvegarde planifiée :
-
-```text
 monsite.fr-backup-auto-20260725T183500-a1b2c3d4e5f6.wpcm
 ```
 
-Ce nommage permet de reconnaître immédiatement l’origine d’une archive lorsque plusieurs sites sont sauvegardés dans le même dossier.
+Les sauvegardes manuelles et planifiées utilisent le même moteur. La planification prend en charge les fréquences horaire, deux fois par jour, quotidienne, hebdomadaire et mensuelle. La rétention peut être définie par nombre d'archives ou par ancienneté, tandis que les sauvegardes manuelles ne sont pas supprimées par la rétention automatique.
 
-### Ce que contient une sauvegarde
+Clone Master peut conserver les fichiers localement ou envoyer les sauvegardes terminées vers un serveur Nextcloud configuré par l'administrateur. Il est possible de garder ou de supprimer la copie locale après un transfert validé, et d'envoyer une notification par e-mail après chaque opération ou uniquement en cas d'erreur.
 
-Selon la configuration choisie, l’archive peut contenir :
+## Ce que contient une archive `.wpcm`
 
-- la base de données WordPress ;
-- les extensions ;
-- les thèmes ;
-- les médias ;
-- les fichiers du site ;
-- les options et réglages ;
-- les données des extensions ;
-- les informations nécessaires au remplacement des URL et chemins.
+Le conteneur `WPCMARCHIVE2` contient une entrée `database.sql` et les fichiers sélectionnés sous `wp-content/`. Selon le site, cela peut inclure les extensions, les thèmes, les médias, les extensions indispensables, les fichiers de langue et les tables WordPress utilisant le préfixe du site.
 
-Le fichier `.wpcm` ne doit pas être décompressé, renommé pendant son envoi ou modifié manuellement.
+Clone Master n'embarque pas le coeur WordPress dans l'archive. Il exclut également ses propres fichiers temporaires ainsi que les emplacements identifiés comme des dépôts de sauvegardes produits par d'autres outils. Cette protection évite de créer une sauvegarde qui contient d'autres sauvegardes et dont la taille augmente à chaque export.
 
----
+Les fichiers de configuration serveur tels que `.htaccess`, `.user.ini`, `php.ini` et `wp-config.php` ne sont pas restaurés automatiquement. Leur gestion reste séparée afin d'éviter d'appliquer une configuration propre à l'ancien hébergement sur le nouveau serveur.
 
-## Restaurer ou migrer un site
+## Un format conçu pour reprendre après une interruption
 
-### Avant de commencer
+Une archive `.wpcm` est construite en ajoutant les données à la suite des blocs déjà validés. Les octets finalisés ne sont pas réécrits à chaque étape. Chaque bloc possède une empreinte SHA-256 et le pied de l'archive authentifie le contenu qui le précède.
 
-Vérifiez que le serveur de destination dispose de suffisamment d’espace libre pour conserver temporairement :
+Lorsqu'une création, un envoi ou une extraction est interrompu, Clone Master reprend depuis un état persistant associé à l'opération. Le moteur vérifie que la source n'a pas changé avant de continuer et refuse de reprendre avec un état appartenant à une autre archive.
 
-- le site actuel ;
-- l’archive `.wpcm` ;
-- les fichiers extraits ;
-- la copie préparée ;
-- les anciennes et nouvelles tables de base de données.
+La publication finale utilise des fichiers temporaires placés dans le même dossier que leur destination, suivis d'un renommage. Des verrous non bloquants empêchent deux processus de modifier simultanément la même sauvegarde ou la même session.
 
-### Procédure guidée
+<details>
+<summary><strong>Voir les principaux mécanismes d'intégrité</strong></summary>
 
-1. Installez WordPress sur le serveur de destination.
-2. Installez et activez Clone Master.
-3. Ouvrez l’outil d’importation.
-4. Sélectionnez l’archive `.wpcm`.
-5. Laissez l’envoi découpé se terminer.
-6. Attendez la validation de l’archive.
-7. Lancez la restauration.
-8. Laissez Clone Master préparer les fichiers et la base.
-9. Attendez la fin de la bascule.
-10. Reconnectez-vous et contrôlez les pages principales.
+<br>
 
-> [!WARNING]
-> Pour une boutique, un site d’inscription ou un site recevant des formulaires, évitez toute nouvelle activité pendant la bascule finale. Une courte fenêtre de maintenance empêche qu’une commande ou un message soit créé entre la sauvegarde et la restauration.
+Le moteur associe plusieurs contrôles plutôt qu'un unique test effectué à la fin :
 
-### Après la restauration
+- empreinte SHA-256 de chaque bloc compressé ;
+- empreinte du contenu portée par le pied de l'archive ;
+- empreinte SHA-256 du fichier publié lorsqu'elle est disponible ;
+- journal durable protégé par HMAC avec numéros de séquence monotones ;
+- emplacements de récupération alternés pour conserver un état précédent exploitable ;
+- écriture temporaire et publication atomique par renommage ;
+- vérification de la taille, de la structure et des sommes de contrôle avant extraction ou stockage.
 
-Contrôlez au minimum :
+</details>
 
-- la page d’accueil ;
-- la connexion à l’administration ;
-- les permaliens ;
-- les images ;
-- les formulaires ;
-- les comptes utilisateurs ;
-- les tâches planifiées ;
-- les extensions importantes ;
-- les commandes ou données métier, lorsque le site en possède.
+## Restaurer ou migrer un site WordPress
 
----
+La restauration commence par une analyse de l'archive et par la préparation de son contenu. La base de données n'est pas importée directement dans les tables actives. Clone Master crée des tables de staging, contrôle leur structure, leur volume, les valeurs sérialisées et les remplacements nécessaires, puis prépare la transition.
 
-## Comment se déroule une restauration ?
+La bascule de la base utilise une instruction MySQL `RENAME TABLE` portant sur l'ensemble des tables concernées. Les fichiers sont promus par renommage sur le même système de fichiers et chaque changement est inscrit dans un journal de rollback signé. Un contrôle de santé est exécuté avant la suppression de l'ancien état.
 
 ```mermaid
-flowchart LR
-    A[Archive .wpcm] --> B[Envoi par blocs]
-    B --> C[Vérification SHA-256]
+flowchart TD
+    A[Archive .wpcm] --> B[Envoi ou sélection locale]
+    B --> C[Vérification de la structure et des blocs]
     C --> D[Extraction temporaire]
     D --> E[Base et fichiers en staging]
-    E --> F[Remplacement des URL]
-    F --> G[Validation complète]
-    G --> H[Bascule finale]
-    H --> I[Contrôle du site]
-    I -->|Succès| J[Nettoyage]
-    I -->|Échec| K[Rollback automatique]
+    E --> F[Remplacement des URL et chemins]
+    F --> G[Contrôles avant bascule]
+    G --> H[Bascule coordonnée]
+    H --> I{Contrôle de santé}
+    I -->|Succès| J[Nettoyage des anciens éléments]
+    I -->|Échec| K[Rollback]
 ```
 
-Tant que les contrôles de préparation ne sont pas terminés, les tables et fichiers existants restent en place.
+Pour une migration, installez d'abord WordPress et Clone Master sur le serveur de destination. Importez ensuite l'archive, vérifiez l'URL cible et laissez le plugin terminer la préparation avant d'autoriser la bascule.
 
----
+> [!WARNING]
+> Une sauvegarde découpée en plusieurs requêtes ne peut pas représenter une transaction unique couvrant toute l'activité d'une base très sollicitée. Pour une boutique, un espace membre, un site de réservation ou un site recevant de nombreux formulaires, prévoyez une fenêtre de maintenance pendant la sauvegarde finale et la restauration.
 
-# Un moteur plus rigoureux qu’un simple ZIP
+## Importer une archive sans restaurer le site
 
-Le moteur de Clone Master repose sur plusieurs mécanismes complémentaires.
+Le mode **Store only** répond à un besoin différent de la restauration. Il permet d'envoyer une archive `.wpcm` vers un site, de la vérifier intégralement puis de l'ajouter à la bibliothèque locale des sauvegardes.
 
-## Format `.wpcm` append-only
+La base de données et les fichiers du site courant restent inchangés. Le plugin ne décompresse pas l'ensemble du contenu dans une arborescence de restauration. Après validation, l'archive est publiée atomiquement avec un nom protégé contre les collisions et un fichier d'empreinte `.sha256` lorsque le calcul est disponible.
 
-L’archive est construite selon un principe append-only.
+Ce mode convient notamment pour centraliser une archive sur le serveur de destination avant une intervention, conserver une sauvegarde client dans Clone Master ou vérifier qu'un fichier transféré peut être relu avant de programmer la restauration.
 
-Les nouvelles données sont ajoutées à la suite des blocs déjà écrits et validés. Le moteur évite ainsi de réécrire continuellement les parties précédentes de l’archive.
+## WP-CLI et environnement de secours
 
-Cette architecture réduit le risque qu’une interruption survenant à un instant précis rende l’ensemble du fichier incohérent.
+Clone Master ajoute un onglet **Recovery** dans l'administration. Il affiche des commandes prêtes à copier avec les chemins du site, du dossier de sauvegarde et de l'outil de récupération propres à l'installation.
 
-## Blocs vérifiés par SHA-256
+### Lorsque WordPress peut encore démarrer
 
-Les données sont réparties en blocs.
+Le plugin enregistre une arborescence de commandes WP-CLI sous `clone-master`. L'alias plus court `wpcm` exécute les mêmes opérations.
 
-Chaque bloc possède une empreinte SHA-256. Lors de la lecture ou de l’envoi, Clone Master recalcule cette empreinte et vérifie qu’elle correspond à la valeur enregistrée.
+```bash
+# Créer une sauvegarde avec le même moteur que l'administration
+wp clone-master backup create
 
-Un bloc incomplet, modifié ou corrompu est détecté avant la restauration.
+# Créer la sauvegarde et la copier vers un autre emplacement local
+wp clone-master backup create --copy-to=/srv/backups/client.wpcm
 
-## Reprise exacte après une coupure
+# Lister les archives locales
+wp clone-master backup list --format=table
 
-Les grandes archives sont envoyées en plusieurs morceaux.
+# Lire l'inventaire authentifié d'une archive
+wp clone-master archive info backup.wpcm --format=json
 
-Lorsque la connexion est interrompue, Clone Master peut reprendre à partir du dernier bloc reçu et validé au lieu de renvoyer toute l’archive.
+# Vérifier la structure, le manifeste et le pied de l'archive
+wp clone-master archive verify backup.wpcm --quick
 
-Pour une sauvegarde de plusieurs centaines de mégaoctets, cette différence évite de recommencer inutilement une opération presque terminée.
+# Vérifier tous les blocs et les sommes de contrôle
+wp clone-master archive verify backup.wpcm
 
-## Journal de restauration protégé par HMAC
+# Vérifier puis extraire vers un dossier vide
+wp clone-master archive extract backup.wpcm /srv/recovery/client
 
-La restauration utilise un journal protégé par HMAC pour mémoriser l’état exact des opérations sensibles.
+# Afficher le chemin et l'utilisation de l'outil autonome
+wp clone-master recovery-kit
+```
 
-Ce journal est écrit sur deux emplacements alternés.
+Le nom d'une archive présente dans `wp-content/wpcm-backups/` peut être utilisé directement. Un chemin absolu vers une autre archive `.wpcm` est également accepté. La commande d'extraction écrit `database.sql` et `wp-content/` dans un dossier vide, conserve un point de reprise local et continue après une interruption.
 
-Pourquoi deux emplacements ?
+Les mêmes commandes sont disponibles avec l'alias :
 
-Parce qu’un serveur peut s’arrêter au moment précis où le journal est lui-même en cours d’écriture. En alternant les copies, Clone Master conserve une version précédente exploitable lorsque la plus récente est incomplète.
+```bash
+wp wpcm backup create
+wp wpcm archive verify backup.wpcm
+wp wpcm archive extract backup.wpcm /srv/recovery/client
+```
 
-Le mécanisme de récupération peut ainsi déterminer plus sûrement :
+### Lorsque WordPress, un thème ou une extension empêche le démarrage
 
-- l’étape atteinte ;
-- les tables déjà basculées ;
-- les fichiers déjà remplacés ;
-- l’ancien état disponible ;
-- l’action de rollback nécessaire.
-
-## Base importée dans des tables de staging
-
-Clone Master n’importe pas directement la sauvegarde dans les tables utilisées par le site.
-
-Il crée d’abord des tables temporaires, puis vérifie :
-
-- leur présence ;
-- leur structure ;
-- leur nombre de lignes ;
-- leurs références ;
-- les valeurs sérialisées ;
-- le remplacement des URL ;
-- les éléments variables tels que certains compteurs `AUTO_INCREMENT`.
-
-Le site existant reste intact pendant cette préparation.
-
-## Bascule atomique par renommage de préfixes
-
-Une fois les validations terminées, Clone Master effectue une bascule coordonnée par renommage des tables.
-
-L’objectif est d’éviter un état intermédiaire dans lequel :
-
-- certaines tables proviendraient de la sauvegarde ;
-- d’autres appartiendraient encore à l’ancien site.
-
-Le moteur conserve l’ancien ensemble le temps de vérifier que le site restauré répond correctement.
-
-## Rollback automatique
-
-Si la restauration finale ne produit pas un site fonctionnel, Clone Master peut rétablir l’ensemble précédent.
-
-Cette architecture apporte une garantie bien supérieure au schéma classique :
+Clone Master publie automatiquement un kit autonome à côté des sauvegardes locales :
 
 ```text
-extraire un ZIP + importer un dump SQL + espérer que toutes les étapes se terminent
+wp-content/wpcm-backups/recovery-kit/wpcm-recovery.php
 ```
 
----
+Ce script s'exécute avec PHP en ligne de commande. Il ne charge ni WordPress, ni les extensions, ni le thème. Il reste donc utilisable après une erreur fatale survenant avant l'initialisation de l'administration ou de WP-CLI.
 
-## Données sérialisées WordPress
+```bash
+# Inspecter le manifeste et l'inventaire
+php wp-content/wpcm-backups/recovery-kit/wpcm-recovery.php info /srv/backups/site.wpcm
 
-WordPress et de nombreuses extensions enregistrent des tableaux et objets sous une forme sérialisée.
+# Vérifier chaque bloc et chaque somme de contrôle
+php wp-content/wpcm-backups/recovery-kit/wpcm-recovery.php verify /srv/backups/site.wpcm
 
-Exemple simplifié :
+# Vérifier puis extraire vers un dossier vide
+php wp-content/wpcm-backups/recovery-kit/wpcm-recovery.php extract /srv/backups/site.wpcm /srv/recovery/site
+```
+
+Ajoutez `--json` à l'une de ces commandes pour obtenir une sortie exploitable par un script :
+
+```bash
+php wp-content/wpcm-backups/recovery-kit/wpcm-recovery.php verify /srv/backups/site.wpcm --json
+```
+
+> [!CAUTION]
+> L'outil autonome extrait et vérifie la sauvegarde, mais ne remplace pas automatiquement le site en production. Cette séparation permet d'examiner les fichiers et les chemins avant une importation de base ou une copie de fichiers.
+
+Après extraction, la récupération manuelle peut s'appuyer sur les commandes suivantes. Adaptez les chemins, contrôlez le préfixe des tables et lancez toujours `rsync` avec `--dry-run` avant la copie :
+
+```bash
+wp --path=/var/www/html db import /srv/recovery/site/database.sql --skip-plugins --skip-themes
+rsync -a --dry-run /srv/recovery/site/wp-content/ /var/www/html/wp-content/
+rsync -a /srv/recovery/site/wp-content/ /var/www/html/wp-content/
+```
+
+## Données sérialisées et remplacement des URL
+
+WordPress et de nombreuses extensions enregistrent des tableaux ou des objets sous une forme sérialisée. La longueur de chaque chaîne fait partie de la valeur :
 
 ```text
 s:24:"https://ancien-site.fr";
 ```
 
-Le nombre `24` représente la longueur exacte de la chaîne.
+Un remplacement SQL direct peut modifier l'URL sans recalculer cette longueur, ce qui rend ensuite la donnée illisible par PHP. Clone Master analyse les valeurs complètes avec un parseur qui n'autorise pas l'instanciation de classes, applique les changements de manière récursive, recalcule les longueurs en octets puis valide le résultat.
 
-Un remplacement SQL direct peut modifier l’adresse sans corriger cette longueur. PHP ne peut alors plus relire la valeur correctement.
+Une chaîne qui ressemble seulement au début d'une valeur sérialisée, par exemple un extrait tronqué ou une ligne de journal, reste traitée comme du texte. Le moteur prend également en charge les chaînes simples et les structures JSON utilisées par WordPress et ses extensions.
 
-Clone Master distingue deux situations :
+## Conservation exacte du caractère `%`
 
-1. la cellule contient une structure sérialisée complète et valide ;
-2. la cellule contient seulement du texte qui ressemble au début d’une structure sérialisée.
-
-Dans le premier cas, le moteur parcourt la structure, remplace les URL et recalcule les longueurs en octets.
-
-Dans le second cas, le contenu reste traité comme du texte ordinaire. Cette distinction est nécessaire pour les extraits, les journaux et certains contenus tronqués enregistrés par des extensions.
-
-Aucune classe PHP provenant de l’archive n’est instanciée pendant cette analyse.
-
----
-
-## Conservation des caractères `%`
-
-Les sites WordPress contiennent fréquemment des valeurs dans lesquelles `%` a une signification précise :
+Le caractère `%` possède plusieurs significations dans WordPress, les extensions SEO et les URL encodées :
 
 ```text
 /%postname%/
@@ -307,80 +248,72 @@ Les sites WordPress contiennent fréquemment des valeurs dans lesquelles `%` a u
 https://example.com/fichier%20avec%20espace
 ```
 
-Clone Master ne remplace jamais globalement le caractère `%`.
+Clone Master n'effectue pas de remplacement global de `%` dans le dump SQL. Les structures de permaliens, les modèles SEO, les pourcentages et les URL encodées sont conservés. Le moteur refuse également de persister un placeholder temporaire non restauré correspondant à une séquence de 64 caractères hexadécimaux entre accolades.
 
-Le moteur protège notamment :
+## Sauvegarde distante sur Nextcloud
 
-- les structures de permaliens ;
-- les modèles SEO ;
-- les pourcentages ;
-- les URL encodées ;
-- les données sérialisées contenant ces valeurs.
+Le stockage Nextcloud est facultatif et cible le serveur WebDAV choisi par l'administrateur. Le mot de passe d'application est enregistré avec un chiffrement authentifié AES-256-GCM dérivé des clés WordPress du site.
 
-Aucun placeholder temporaire non restauré ne doit rester enregistré dans la base.
+Les requêtes sont limitées aux adresses publiques, les redirections sont désactivées et les transferts sont effectués en streaming afin d'éviter de charger une archive complète en mémoire. Lorsque l'environnement cURL le permet, la connexion utilise l'adresse DNS préalablement validée pour réduire les risques de changement de destination entre la validation et le transfert.
 
----
+Clone Master ne contacte aucun service de stockage imposé par l'éditeur. Les requêtes sortantes sont déclenchées uniquement lorsque Nextcloud est configuré par un administrateur.
 
-# Conçu pour les hébergements WordPress
+## Installation
 
-Construire un moteur fiable dans un environnement de test contrôlé est une première étape.
+1. Téléchargez ou clonez le dépôt dans `wp-content/plugins/clone-master/`.
+2. Activez **Clone Master** depuis l'administration WordPress.
+3. Ouvrez l'écran **Server** et contrôlez l'espace disque, la mémoire PHP, la taille maximale d'envoi et les extensions requises.
+4. Lancez une première sauvegarde manuelle et téléchargez l'archive obtenue.
+5. Configurez ensuite la planification, la rétention, les notifications et Nextcloud selon votre politique de sauvegarde.
 
-Le rendre fiable sur un parc de serveurs hétérogènes est un travail différent.
+Sur Nginx, le plugin fonctionne sans `.htaccess`. Une règle de refus d'accès au chemin fixe des sauvegardes est proposée dans l'administration pour ajouter une protection au niveau du serveur web.
 
-Clone Master a été testé notamment avec :
+## Prérequis et compatibilité
 
-| Élément | Environnement testé |
+| Composant | Prérequis ou comportement |
 |---|---|
-| PHP | PHP 8.5 |
-| Serveur web | nginx |
-| Serveur web | LiteSpeed Web Server |
-| Base de données | MySQL et MariaDB |
-| WordPress | Installations avec extensions et tables personnalisées |
-| Archives | Envois découpés de plusieurs centaines de mégaoctets |
-| Migration | Remplacement d’URL, chemins et données sérialisées |
+| WordPress | Version 5.6 ou plus récente, testé jusqu'à WordPress 7.0 |
+| PHP | Version 7.4 ou plus récente |
+| Extensions PHP | MySQLi, JSON, zlib et OpenSSL |
+| Base de données | MySQL ou MariaDB |
+| Serveur web | Compatible avec Apache, Nginx et LiteSpeed sans dépendre de `fastcgi_finish_request()` |
+| WP-CLI | Facultatif pour l'interface, recommandé pour l'automatisation et la récupération |
+| Espace disque | Suffisant pour l'archive, la zone temporaire, le staging et l'ancien état conservé pendant la bascule |
 
-Les hébergements peuvent toutefois appliquer leurs propres limites, caches et règles de sécurité.
+Le moteur natif `.wpcm` ne dépend pas d'une extension PHP générique de création d'archives.
 
----
+## Limites à connaître
 
-Ne publiez jamais dans une issue publique :
+Les tables possédant une clé primaire ou une clé `UNIQUE NOT NULL` peuvent être exportées avec des curseurs reprenables. Pour les tables non vides qui ne disposent pas d'une telle clé, Clone Master tente de créer un instantané auxiliaire avec un curseur synthétique, puis utilise un mode de repli limité par la mémoire si les droits nécessaires ne sont pas disponibles.
 
-- une archive `.wpcm` contenant les données du site ;
-- un mot de passe ;
-- une clé secrète ;
-- des cookies ;
-- un fichier de configuration privé ;
-- des données personnelles de clients.
+Les vues et déclencheurs utilisant le préfixe WordPress sont refusés, car leur restauration transactionnelle exigerait une gestion de dépendances qui n'est pas incluse dans cette version.
 
----
+La réussite d'une sauvegarde ne remplace pas un test de récupération. Vérifiez régulièrement une archive avec WP-CLI ou le kit autonome et réalisez des restaurations de contrôle dans un environnement distinct.
 
-## Bonnes pratiques
+## Diagnostics et demande d'aide
 
-- [ ] Conserver plusieurs sauvegardes
-- [ ] Garder au moins une copie hors du serveur
-- [ ] Tester périodiquement une restauration
-- [ ] Vérifier l’espace disque avant une migration
-- [ ] Prévoir une fenêtre de maintenance pour les sites transactionnels
-- [ ] Contrôler les pages importantes après la restauration
-- [ ] Exporter le diagnostic avant de nettoyer une session ayant échoué
+Les opérations produisent des diagnostics persistants avec un identifiant de requête. En cas d'échec, conservez cet identifiant et exportez le journal depuis l'écran **Diagnostics** avant de nettoyer la session.
 
+Pour signaler un problème, utilisez les [issues GitHub](https://github.com/Assistouest/clone-master/issues) en indiquant la version de Clone Master, WordPress, PHP, le serveur web, le moteur de base de données et l'étape concernée.
 
+Ne joignez jamais à une issue publique une archive `.wpcm`, un fichier `wp-config.php`, un mot de passe, un jeton Nextcloud, des cookies d'administration ou des données personnelles.
 
-## Philosophie du projet
+## Confidentialité
 
-Clone Master suit quatre principes :
+Clone Master ne contient ni mesure d'audience, ni publicité, ni télémétrie, ni suivi utilisateur. Une connexion externe est effectuée uniquement lorsque l'administrateur configure Nextcloud, et elle cible le serveur renseigné dans les réglages.
 
-1. **Ne pas modifier le site actif avant validation.**
-2. **Détecter une incohérence plutôt que poursuivre silencieusement.**
-3. **Pouvoir reprendre ou revenir en arrière après une interruption.**
-4. **Rendre les opérations compréhensibles depuis WordPress.**
+## Licence
 
-Le moteur `.wpcm` append-only, les blocs SHA-256, la reprise exacte, le journal HMAC alterné, le staging complet et la bascule atomique forment un ensemble cohérent.
+Clone Master est distribué sous licence **GPL-2.0-or-later**. Consultez le fichier [`LICENSE`](LICENSE) pour le texte complet de la licence.
 
----
+## Gérer un parc de sites WordPress
+
+Clone Master intervient au niveau d'un site pour la sauvegarde, la migration et la récupération. Pour centraliser les mises à jour, la sécurité, la disponibilité, les performances et les rapports clients d'un parc WordPress, découvrez WP Commander.
 
 <div align="center">
 
-### Une sauvegarde utile est une sauvegarde vérifiée, conservée ailleurs et déjà restaurée au moins une fois.
+### [Gérer plusieurs sites WordPress depuis un seul tableau de bord](https://wpcommander.fr/)
+
+Supervisez les sites de vos clients, traitez les actions prioritaires et produisez les preuves de votre maintenance depuis un espace conçu pour les agences WordPress.
 
 </div>
