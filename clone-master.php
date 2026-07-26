@@ -3,7 +3,7 @@
  * Plugin Name: Clone Master
  * Plugin URI: https://github.com/Assistouest/clone-master
  * Description: Create resumable WordPress backups and perform staged migrations with strict validation and transactional rollback.
- * Version: 3.2.3
+ * Version: 3.2.7
  * Author: Adrien Piron
  * Author URI: https://profiles.wordpress.org/adrienpiron/
  * License: GPL v2 or later
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 if ( ! defined( 'WPCM_VERSION' ) ) {
-    define( 'WPCM_VERSION', '3.2.3' );
+    define( 'WPCM_VERSION', '3.2.7' );
 }
 if ( ! defined( 'WPCM_PLUGIN_DIR' ) ) {
     define( 'WPCM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
@@ -162,6 +162,7 @@ class WPCM_Plugin {
             self::protect_directory( $dir );
         }
         $this->prepare_download_directory();
+        $this->prepare_recovery_kit();
         update_option( 'wpcm_version', WPCM_VERSION );
 
         // Initialise default schedule settings if not present
@@ -315,6 +316,87 @@ class WPCM_Plugin {
             false,
             dirname( plugin_basename( __FILE__ ) ) . '/languages'
         );
+
+        // Plugin updates do not always execute the activation hook. Refresh the
+        // autonomous recovery kit whenever the installed version changes.
+        if ( (string) get_option( 'wpcm_version', '' ) !== WPCM_VERSION ) {
+            foreach ( array( WPCM_BACKUP_DIR, WPCM_TEMP_DIR, WPCM_LOG_DIR ) as $dir ) {
+                if ( ! is_dir( $dir ) ) {
+                    wp_mkdir_p( $dir );
+                }
+                self::protect_directory( $dir );
+            }
+            $this->prepare_download_directory();
+            $this->prepare_recovery_kit();
+            update_option( 'wpcm_version', WPCM_VERSION );
+        }
+    }
+
+    /**
+     * Publish an autonomous CLI recovery kit next to local backups.
+     *
+     * The kit contains only the streaming archive reader and does not bootstrap
+     * WordPress. It therefore remains usable when plugins, themes or WordPress
+     * itself fail during normal loading.
+     *
+     * @return void
+     */
+    public function prepare_recovery_kit(): void {
+        $source = WPCM_PLUGIN_DIR . 'tools/recovery/';
+        $target = WPCM_BACKUP_DIR . 'recovery-kit/';
+        if ( ! is_dir( $source ) ) {
+            return;
+        }
+
+        try {
+            if ( ! is_dir( $target ) && ! wp_mkdir_p( $target ) ) {
+                throw new RuntimeException( 'Unable to create the recovery-kit directory.' );
+            }
+            self::protect_directory( $target, false );
+
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator( $source, FilesystemIterator::SKIP_DOTS ),
+                RecursiveIteratorIterator::SELF_FIRST
+            );
+            foreach ( $iterator as $item ) {
+                $relative    = ltrim( str_replace( '\\', '/', substr( $item->getPathname(), strlen( $source ) ) ), '/' );
+                $destination = $target . $relative;
+                if ( $item->isDir() ) {
+                    if ( ! is_dir( $destination ) && ! wp_mkdir_p( $destination ) ) {
+                        throw new RuntimeException( 'Unable to create a recovery-kit subdirectory.' );
+                    }
+                    continue;
+                }
+                $contents = @file_get_contents( $item->getPathname() );
+                if ( ! is_string( $contents ) ) {
+                    throw new RuntimeException( 'Unable to read a recovery-kit source file.' );
+                }
+                if ( ! is_dir( dirname( $destination ) ) && ! wp_mkdir_p( dirname( $destination ) ) ) {
+                    throw new RuntimeException( 'Unable to create a recovery-kit parent directory.' );
+                }
+                WPCM_Reliability::atomic_write( $destination, $contents, 0640 );
+            }
+
+            $launcher = $target . 'wpcm-recovery.php';
+            if ( is_file( $launcher ) ) {
+                @chmod( $launcher, 0750 );
+                WPCM_Reliability::atomic_write(
+                    $launcher . '.sha256',
+                    hash_file( 'sha256', $launcher ) . "\n",
+                    0640
+                );
+            }
+        } catch ( Throwable $error ) {
+            update_option(
+                'wpcm_activation_warning',
+                sprintf(
+                    /* translators: %s: recovery-kit publication error. */
+                    __( 'Clone Master could not publish its autonomous recovery kit: %s', 'clone-master' ),
+                    $error->getMessage()
+                ),
+                false
+            );
+        }
     }
 
     /**
@@ -348,17 +430,13 @@ class WPCM_Plugin {
     public function admin_assets( $hook ) {
         if ( $hook !== 'toplevel_page_clone-master' ) return;
 
-        // Use file modification time as version to bust browser cache on every update
-        $css_ver = WPCM_VERSION . '.' . filemtime( WPCM_PLUGIN_DIR . 'admin/css/admin.css' );
-        $js_ver  = WPCM_VERSION . '.' . filemtime( WPCM_PLUGIN_DIR . 'admin/js/admin.js' );
-
-        wp_enqueue_style( 'wpcm-admin', WPCM_PLUGIN_URL . 'admin/css/admin.css', [], $css_ver );
-        wp_enqueue_script( 'wpcm-admin', WPCM_PLUGIN_URL . 'admin/js/admin.js', [ 'wp-element', 'wp-i18n' ], $js_ver, true );
+        // Content-addressed asset filenames prevent stale proxy, CDN, browser and optimization-plugin caches.
+        wp_enqueue_style( 'wpcm-admin', WPCM_PLUGIN_URL . 'admin/css/admin.73a3aa2fea18.css', [], WPCM_VERSION );
+        wp_enqueue_script( 'wpcm-admin', WPCM_PLUGIN_URL . 'admin/js/admin.4ca742bc6270.js', [ 'wp-element', 'wp-i18n' ], WPCM_VERSION, true );
         wp_set_script_translations( 'wpcm-admin', 'clone-master', WPCM_PLUGIN_DIR . 'languages' );
 
-        // Schedule tab : loaded after admin.js, adds the ScheduleTab component
-        $sched_ver = WPCM_VERSION . '.' . filemtime( WPCM_PLUGIN_DIR . 'admin/js/schedule-tab.js' );
-        wp_enqueue_script( 'wpcm-schedule', WPCM_PLUGIN_URL . 'admin/js/schedule-tab.js', [ 'wpcm-admin', 'wp-i18n' ], $sched_ver, true );
+        // Schedule tab: loaded after admin.js and addressed by its content hash.
+        wp_enqueue_script( 'wpcm-schedule', WPCM_PLUGIN_URL . 'admin/js/schedule-tab.5ac474ae07bc.js', [ 'wpcm-admin', 'wp-i18n' ], WPCM_VERSION, true );
         wp_set_script_translations( 'wpcm-schedule', 'clone-master', WPCM_PLUGIN_DIR . 'languages' );
 
         // Next scheduled run (resolved server-side so it's accurate regardless of timezone)
@@ -383,7 +461,10 @@ class WPCM_Plugin {
             'restNonce'  => wp_create_nonce( 'wp_rest' ),
             'siteUrl'    => site_url(),
             'homeUrl'    => home_url(),
-            'pluginUrl'  => WPCM_PLUGIN_URL,
+            'pluginUrl'       => WPCM_PLUGIN_URL,
+            'backupDir'       => WPCM_BACKUP_DIR,
+            'recoveryKitPath' => WPCM_BACKUP_DIR . 'recovery-kit/wpcm-recovery.php',
+            'sitePath'        => ABSPATH,
             'maxUpload'          => wp_max_upload_size(),
             'uploadChunkMax'     => $this->stream_upload_chunk_limit(),
             'uploadChunkInitial' => $this->stream_upload_initial_chunk(),
@@ -2274,5 +2355,10 @@ WPCM_Recovery::maybe_recover();
 
 // Initialize.
 WPCM_Plugin::instance();
+
+// Register the command tree only inside WP-CLI.
+if ( defined( 'WP_CLI' ) && WP_CLI ) {
+    WPCM_CLI::register();
+}
 
 endif; // class_exists WPCM_Plugin

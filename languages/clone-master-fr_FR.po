@@ -5,10 +5,10 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: Clone Master 3.2.3\n"
+"Project-Id-Version: Clone Master 3.2.7\n"
 "Report-Msgid-Bugs-To: https://github.com/Assistouest/clone-master/issues\n"
 "POT-Creation-Date: 2026-07-26 00:30+0000\n"
-"PO-Revision-Date: 2026-07-26 00:20+0000\n"
+"PO-Revision-Date: 2026-07-26 13:30+0200\n"
 "Last-Translator: Assistouest\n"
 "Language: fr_FR\n"
 "Language-Team: French <fr@li.org>\n"
@@ -98,6 +98,27 @@ msgstr " ou pendant "
 msgid "%1$d paths scanned into %2$d bounded append jobs."
 msgstr "%1$d paths scanned into %2$d bounded append jobs."
 
+#: includes/class-exporter.php
+msgid "%1$d paths scanned into %2$d bounded append jobs. %3$d backup location(s) were excluded to prevent nested backups."
+msgstr ""
+"%1$d chemins analysés et répartis dans %2$d lots durables. %3$d emplacement(s) de sauvegarde ont été exclus pour "
+"éviter les sauvegardes imbriquées."
+
+#: admin/js/admin.js clone-master.php includes/class-importer.php
+msgid "%1$s (%2$s bytes)"
+msgstr "%1$s (%2$s octets)"
+
+#: admin/js/admin.js clone-master.php
+msgid "%1$s / %2$s · %3$s Mbit/s · about %4$s remaining"
+msgstr "%1$s sur %2$s · %3$s Mbit/s · reste environ %4$s"
+
+msgid "%1$s backup location(s) excluded%2$s."
+msgstr "%1$s emplacement(s) de sauvegarde exclu(s)%2$s."
+
+#: admin/js/admin.js clone-master.php
+msgid "%1$s received of %2$s."
+msgstr "%1$s reçus sur %2$s."
+
 #: includes/class-storage-driver.php:502
 #, python-format
 msgid "%d part"
@@ -111,6 +132,14 @@ msgid "%d table exported with durable immutable chunks. Scanning files…"
 msgid_plural "%d tables exported with durable immutable chunks. Scanning files…"
 msgstr[0] "%d table exportée avec des fragments durables immuables. Analyse des fichiers…"
 msgstr[1] "%d tables exportées avec des fragments durables immuables. Analyse des fichiers…"
+
+#, python-format
+msgid "%d table exported with durable immutable chunks. The exact source total is ready."
+msgstr "%d table exportée avec des fragments durables immuables. Le volume source exact est disponible."
+
+#, python-format
+msgid "%d tables exported with durable immutable chunks. The exact source total is ready."
+msgstr "%d tables exportées avec des fragments durables immuables. Le volume source exact est disponible."
 
 msgid "A PHP fatal error was detected."
 msgstr "Une erreur PHP fatale a été détectée."
@@ -131,6 +160,10 @@ msgstr ""
 msgid "A backup is already running. Please wait for it to finish."
 msgstr "A backup is already running. Please wait for it to finish."
 
+#: includes/class-importer.php
+msgid "A completed WPCM extraction file is missing."
+msgstr "Un fichier d’extraction WPCM terminé est introuvable."
+
 #: includes/class-exporter.php:931
 msgid "A database table conflicts with the internal snapshot name."
 msgstr "Une table de la base de données entre en conflit avec le nom d’instantané interne."
@@ -150,10 +183,30 @@ msgstr "A durable file-map descriptor is missing or altered."
 msgid "A fatal PHP error interrupted the request. Open Diagnostics and use the event ID below."
 msgstr "Une erreur PHP fatale a interrompu la requête. Ouvrez Diagnostics et utilisez l’identifiant d’événement ci-dessous."
 
+#: admin/js/admin.js clone-master.php
+msgid "A new upload must start at byte zero."
+msgstr "Un nouvel envoi doit commencer à l’octet zéro."
+
+#: includes/class-importer.php
+msgid "A pending WPCM extraction path escaped its protected root."
+msgstr "Un chemin de publication WPCM en attente est sorti de l’espace protégé."
+
+#: includes/class-importer.php
+msgid "A published WPCM extraction file has an unexpected size."
+msgstr "Un fichier WPCM publié possède une taille inattendue."
+
 #: includes/class-exporter.php:1203
 #, python-format
 msgid "A scanned path disappeared or is not a regular file: %s"
 msgstr "A scanned path disappeared or is not a regular file: %s"
+
+#: includes/class-exporter.php:1473
+msgid ""
+"A single exported row from table %1$s requires %2$s of SQL, above the safe MySQL packet allowance of %3$s. Increase "
+"max_allowed_packet before creating a portable backup."
+msgstr ""
+"Une ligne exportée de la table %1$s nécessite %2$s de SQL, au-dessus de la limite MySQL sûre de %3$s. Augmentez "
+"max_allowed_packet avant de créer une sauvegarde portable."
 
 #: includes/class-importer.php:439
 msgid "A symbolic link appeared after WPCM extraction."
@@ -162,6 +215,9 @@ msgstr "Un lien symbolique est apparu après l’extraction WPCM."
 #: admin/js/admin.js:926
 msgid "ABSPATH"
 msgstr "Chemin ABSPATH"
+
+msgid "Accelerated download"
+msgstr "Téléchargement accéléré"
 
 #: admin/js/admin.js:623
 msgid "Accepted format: .wpcm : or click to browse"
@@ -186,13 +242,33 @@ msgstr "Thème actif"
 msgid "Activity log"
 msgstr "Journal d'activité"
 
+#: admin/js/admin.js
+msgid "Adaptive archive validation in progress…"
+msgstr "Validation adaptative de l’archive en cours…"
+
 #: admin/js/admin.js:237
 msgid "Adaptive batch:"
 msgstr "Lot adaptatif :"
 
+#: admin/js/admin.js clone-master.php
+msgid "Adaptive chunk adjusted to "
+msgstr "Morceau adaptatif ajusté à "
+
+#: admin/js/admin.js clone-master.php
+msgid "Adaptive resumable upload: starting at "
+msgstr "Envoi reprenable adaptatif : démarrage à "
+
+#: admin/js/admin.js
+#, python-format
+msgid "Adaptive validation block adjusted to %s."
+msgstr "Bloc de validation adaptatif ajusté à %s."
+
 #: admin/js/schedule-tab.js:575
 msgid "Add this block to your Nginx configuration and reload it:"
 msgstr "Ajoutez ce bloc à votre configuration Nginx et rechargez-le :"
+
+msgid "Adding the verified archive to local backups…"
+msgstr "Ajout de l’archive vérifiée aux sauvegardes locales…"
 
 #: admin/js/admin.js:685 admin/js/admin.js:1063
 msgid "Advanced options"
@@ -269,6 +345,16 @@ msgstr "Another request is writing this upload session."
 msgid "Appending verified WPCM blocks: %s"
 msgstr "Ajout des blocs WPCM vérifiés : %s"
 
+#: admin/js/admin.js clone-master.php
+msgid "Archive already received and ready for validation."
+msgstr "Archive déjà reçue et prête pour la validation."
+
+msgid "Archive creation"
+msgstr "Création de l’archive"
+
+msgid "Archive creation complete."
+msgstr "Création de l’archive terminée."
+
 #: admin/js/admin.js:517
 msgid "Archive received successfully."
 msgstr "Archive reçue avec succès."
@@ -277,8 +363,40 @@ msgstr "Archive reçue avec succès."
 msgid "Archive source"
 msgstr "Archive source"
 
+msgid "Archive stored successfully."
+msgstr "Archive enregistrée avec succès."
+
+#: admin/js/admin.js
+msgid "Archive structure indexed. Adaptive validation is starting."
+msgstr "Structure de l’archive indexée. La validation adaptative commence."
+
+msgid "Archive upload and storage in progress"
+msgstr "Envoi et enregistrement de l’archive en cours"
+
 msgid "Archive upload and validation in progress"
 msgstr "Envoi et validation de l'archive en cours"
+
+#: admin/js/admin.js
+msgid "Archive validation completed."
+msgstr "Validation de l’archive terminée."
+
+#: admin/js/admin.js
+#, python-format
+msgid "Archive validation: %d%%."
+msgstr "Validation de l’archive : %d %%."
+
+#, python-format
+msgid "Archive verified and added to local backups: %s."
+msgstr "Archive vérifiée et ajoutée aux sauvegardes locales : %s."
+
+#: includes/class-exporter.php
+#, python-format
+msgid "Archiving %1$s: %2$s of %3$s (%4$d%%). Overall: %5$s of %6$s."
+msgstr "Archivage de %1$s : %2$s sur %3$s (%4$d %%). Progression globale : %5$s sur %6$s."
+
+#: includes/class-exporter.php
+msgid "Archiving database.sql: %1$s of %2$s."
+msgstr "Archivage de database.sql : %1$s sur %2$s."
 
 #: admin/js/admin.js:701 admin/js/admin.js:1075
 msgid ""
@@ -300,6 +418,16 @@ msgstr "Authentification refusée : vérifiez le token d'application."
 #: admin/js/schedule-tab.js:761
 msgid "Automatic"
 msgstr "Automatique"
+
+#: admin/js/admin.js:459
+msgid "Automatic target:"
+msgstr "Cible automatique :"
+
+msgid "Available during archiving"
+msgstr "Disponible pendant l’archivage"
+
+msgid "Backup complete"
+msgstr "Sauvegarde terminée"
 
 #: admin/js/schedule-tab.js:252
 msgid "Backup complete : "
@@ -327,6 +455,11 @@ msgstr "Sauvegarde en cours"
 #: includes/class-scheduler.php:275
 msgid "Backup in progress."
 msgstr "Backup in progress."
+
+msgid "Backup locations from other migration plugins are excluded automatically to avoid nested archives."
+msgstr ""
+"Les emplacements de sauvegarde des autres extensions de migration sont exclus automatiquement pour éviter les "
+"archives imbriquées."
 
 #: includes/class-scheduler.php:136
 msgid "Backup queued."
@@ -367,6 +500,20 @@ msgstr "Both source and target backup filenames exist; refusing an ambiguous pub
 msgid "Bounded file component %d"
 msgstr "Bounded file component %d"
 
+#: admin/js/admin.js
+msgid "Building the archive structural index…"
+msgstr "Création de l’index structurel de l’archive…"
+
+#: admin/js/admin.js
+msgid "Building the backup structural index…"
+msgstr "Création de l’index structurel de la sauvegarde…"
+
+msgid "Building the exact site inventory"
+msgstr "Création de l’inventaire exact du site"
+
+msgid "Calculating…"
+msgstr "Calcul en cours…"
+
 #: admin/js/admin.js:710 admin/js/schedule-tab.js:632
 msgid "Cancel"
 msgstr "Annuler"
@@ -386,6 +533,9 @@ msgstr "Vérifiez les informations et configurez les options avant de lancer la 
 #: admin/js/admin.js:1037
 msgid "Check the settings and configure the options before starting the restore."
 msgstr "Vérifiez les réglages et configurez les options avant de lancer la restauration."
+
+msgid "Choose an empty extraction directory. The tool refuses to overwrite an existing recovery tree."
+msgstr "Choisissez un répertoire d’extraction vide. L’outil refuse d’écraser une arborescence de récupération existante."
 
 #: clone-master.php:619
 msgid "Chunk %1$d of %2$d stored and verified."
@@ -433,9 +583,21 @@ msgstr "Clone Master"
 msgid "Clone Master automatically restored the previous site state after an interrupted migration."
 msgstr "Clone Master a restauré automatiquement l’état précédent du site après une migration interrompue."
 
+#: clone-master.php
+#, python-format
+msgid "Clone Master could not publish its autonomous recovery kit: %s"
+msgstr "Clone Master n’a pas pu publier son kit de récupération autonome : %s"
+
 #: includes/class-recovery.php:111
 msgid "Clone Master detected an interrupted migration but automatic rollback failed: "
 msgstr "Clone Master a détecté une migration interrompue, mais le retour automatique à l’état précédent a échoué : "
+
+msgid ""
+"Clone Master first builds a durable inventory, then creates and verifies the archive with workers adapted to your "
+"hosting."
+msgstr ""
+"Clone Master crée d’abord un inventaire durable, puis génère et vérifie l’archive avec des traitements adaptés à "
+"votre hébergement."
 
 msgid ""
 "Clone Master records each critical transition, caught PHP error, fatal shutdown and unexpected browser response. "
@@ -482,9 +644,26 @@ msgstr "Connexion annulée : la fenêtre a été fermée."
 msgid "Connection successful. Folder created on Nextcloud."
 msgstr "Connexion réussie. Dossier créé sur Nextcloud."
 
+msgid "Copied"
+msgstr "Copié"
+
+msgid "Copy"
+msgstr "Copier"
+
+msgid "Copy the commands below when you need to create, inspect, verify or extract a WPCM backup from the server shell."
+msgstr ""
+"Copiez les commandes ci-dessous pour créer, inspecter, vérifier ou extraire une sauvegarde WPCM depuis le terminal du"
+" serveur."
+
+msgid "Copy this command"
+msgstr "Copiez cette commande"
+
 #: includes/class-exporter.php:96
 msgid "Corrupt or unauthenticated export manifest."
 msgstr "Corrupt or unauthenticated export manifest."
+
+msgid "Create and list backups"
+msgstr "Créer et lister les sauvegardes"
 
 #: admin/js/admin.js:662 admin/js/admin.js:1044
 msgid "Created on"
@@ -494,9 +673,25 @@ msgstr "Créée le"
 msgid "Creates a complete archive of your WordPress installation, ready to migrate or store safely."
 msgstr "Crée une archive complète de votre installation WordPress, prête à migrer ou à conserver en toute sécurité."
 
+msgid "Creating the archive"
+msgstr "Création de l’archive"
+
 #: includes/class-storage-driver.php:198
 msgid "Credentials must not be embedded in the Nextcloud URL."
 msgstr "Credentials must not be embedded in the Nextcloud URL."
+
+msgid "Current file progress:"
+msgstr "Progression du fichier actuel :"
+
+msgid "Current file:"
+msgstr "Fichier actuel :"
+
+msgid "Current speed"
+msgstr "Débit actuel"
+
+#: admin/js/admin.js:459
+msgid "Current table"
+msgstr "Table actuelle"
 
 #: admin/js/admin.js:205
 msgid "Current table:"
@@ -579,6 +774,14 @@ msgstr ""
 "Déposez votre fichier .wpcm ou cliquez pour le sélectionner. Les fichiers volumineux sont envoyés en plusieurs "
 "parties pour contourner les limites du serveur."
 
+#: admin/js/admin.js
+msgid ""
+"Drop your .wpcm file or click to select it. Large files use a resumable adaptive transfer that adjusts automatically "
+"to the server."
+msgstr ""
+"Déposez votre fichier .wpcm ou cliquez pour le sélectionner. Les fichiers volumineux utilisent un transfert adaptatif"
+" reprenable qui s’ajuste automatiquement au serveur."
+
 #: admin/js/admin.js:622
 msgid "Drop your archive here"
 msgstr "Déposez votre archive ici"
@@ -586,6 +789,9 @@ msgstr "Déposez votre archive ici"
 #: admin/js/schedule-tab.js:746
 msgid "Duration"
 msgstr "Durée"
+
+msgid "Elapsed time"
+msgstr "Temps écoulé"
 
 #: admin/js/admin.js:226
 msgid "Elapsed time:"
@@ -604,6 +810,9 @@ msgstr "Réponse vide : le serveur a peut-être expiré. "
 msgid "Error: "
 msgstr "Erreur : "
 
+msgid "Estimated time remaining"
+msgstr "Temps restant estimé"
+
 #: admin/js/schedule-tab.js:118
 msgid "Every day"
 msgstr "Chaque jour"
@@ -619,6 +828,18 @@ msgstr "Chaque mois"
 #: admin/js/schedule-tab.js:119
 msgid "Every week"
 msgstr "Chaque semaine"
+
+msgid "Exact inventory"
+msgstr "Inventaire exact"
+
+msgid "Exact inventory complete."
+msgstr "Inventaire exact terminé."
+
+msgid "Exact inventory completed"
+msgstr "Inventaire exact terminé"
+
+msgid "Exact value"
+msgstr "Valeur exacte"
 
 #: admin/js/admin.js:879
 msgid "Execution time"
@@ -636,6 +857,9 @@ msgstr "Export complete. Heavy temporary data was removed and a small retry-safe
 msgid "Export session not found."
 msgstr "Export session not found."
 
+msgid "Export stages"
+msgstr "Étapes de l’export"
+
 #: includes/class-scheduler.php:333
 msgid "Export verified. Finalizing backup storage."
 msgstr "Export verified. Finalizing backup storage."
@@ -644,9 +868,15 @@ msgstr "Export verified. Finalizing backup storage."
 msgid "Export your site"
 msgstr "Exporter votre site"
 
+msgid "Exporting the database"
+msgstr "Export de la base de données"
+
 #: clone-master.php:386
 msgid "Exporting..."
 msgstr "Exporting..."
+
+msgid "Extract without restoring"
+msgstr "Extraire sans restaurer"
 
 #: admin/js/admin.js:846
 msgid "Failed to load server information."
@@ -684,6 +914,9 @@ msgstr "Fichier stocké localement."
 msgid "File uploaded to Nextcloud (%1$s, %2$s)."
 msgstr "Fichier uploadé sur Nextcloud (%1$s, %2$s)."
 
+msgid "Files"
+msgstr "Fichiers"
+
 msgid "Finish the current operation before starting another restore."
 msgstr "Terminez l'opération actuelle avant de démarrer une autre restauration."
 
@@ -698,6 +931,10 @@ msgstr "Espace libre"
 #: admin/js/schedule-tab.js:412
 msgid "Frequency"
 msgstr "Fréquence"
+
+#: admin/js/admin.js clone-master.php
+msgid "GiB"
+msgstr "Gio"
 
 #: includes/class-scheduler.php:626
 msgid ""
@@ -733,6 +970,10 @@ msgstr "HTTP %1$s lors du PUT."
 msgid "HTTP 413 : initial chunk reduced to "
 msgstr "HTTP 413 : taille du premier morceau réduite à "
 
+#: admin/js/admin.js clone-master.php
+msgid "HTTP 413: adaptive chunk reduced to "
+msgstr "HTTP 413 : morceau adaptatif réduit à "
+
 #: admin/js/admin.js:700 admin/js/admin.js:1074
 msgid "Hide site from search engines"
 msgstr "Masquer le site aux moteurs de recherche"
@@ -741,6 +982,15 @@ msgstr "Masquer le site aux moteurs de recherche"
 msgid "History cleared."
 msgstr "Historique effacé."
 
+msgid "Import"
+msgstr "Importer"
+
+msgid "Import a Clone Master archive"
+msgstr "Importer une archive Clone Master"
+
+msgid "Import another archive"
+msgstr "Importer une autre archive"
+
 #: includes/class-importer.php:158
 msgid "Import session not found."
 msgstr "Import session not found."
@@ -748,6 +998,13 @@ msgstr "Import session not found."
 #: clone-master.php:387
 msgid "Importing..."
 msgstr "Importing..."
+
+#: admin/js/admin.js:459
+msgid "Increased after two fast, low-resource calls"
+msgstr "Augmentation après deux appels rapides et peu gourmands"
+
+msgid "Inspect and verify an archive"
+msgstr "Inspecter et vérifier une archive"
 
 #: admin/js/admin.js:581 admin/js/admin.js:1013
 msgid "Installer error on step "
@@ -800,16 +1057,40 @@ msgstr "Invalid or incomplete uploaded archive path."
 msgid "Invalid response on step "
 msgstr "Réponse invalide à l’étape "
 
+#: admin/js/admin.js clone-master.php
+msgid "Invalid resumable upload metadata or request size."
+msgstr "Métadonnées de reprise ou taille de requête invalides."
+
 #: clone-master.php:490
 msgid "Invalid upload session identifier."
 msgstr "Invalid upload session identifier."
 
+msgid "Inventory in progress"
+msgstr "Inventaire en cours"
+
 msgid "JavaScript is required for resumable backup and restore operations."
 msgstr "JavaScript est requis pour les opérations de sauvegarde et de restauration reprenables."
+
+#: includes/class-importer.php
+msgid "KiB"
+msgstr "Kio"
+
+#: admin/js/admin.js:459
+msgid "Last call"
+msgstr "Dernier appel"
+
+#: includes/class-exporter.php
+#, python-format
+msgid "Last excluded backup location: %s."
+msgstr "Dernier emplacement de sauvegarde exclu : %s."
 
 #: admin/js/admin.js:629 admin/js/admin.js:1059
 msgid "Leave as-is if restoring on the same domain."
 msgstr "Laissez tel quel si vous restaurez sur le même domaine."
+
+#: admin/js/admin.js:459
+msgid "Limited by the average row size"
+msgstr "Limité par la taille moyenne des lignes"
 
 msgid "Loading diagnostics..."
 msgstr "Chargement des diagnostics..."
@@ -859,13 +1140,27 @@ msgstr "Connectez-vous à Nextcloud dans la fenêtre qui vient de s’ouvrir, pu
 msgid "Manual"
 msgstr "Manuel"
 
+msgid "Manual recovery after extraction"
+msgstr "Récupération manuelle après extraction"
+
 #: admin/js/admin.js:865
 msgid "Maximum upload"
 msgstr "Taille maximale d’envoi"
 
+msgid "Measured on this server"
+msgstr "Mesuré sur ce serveur"
+
+#: admin/js/admin.js:459
+msgid "Measuring server capacity"
+msgstr "Mesure des capacités du serveur"
+
 #: admin/js/admin.js:863
 msgid "Media"
 msgstr "Médias"
+
+#: admin/js/admin.js clone-master.php
+msgid "MiB"
+msgstr "Mio"
 
 #: admin/js/admin.js:592 admin/js/admin.js:1023
 msgid "Migration completed successfully."
@@ -904,6 +1199,10 @@ msgstr "Nouvelle restauration"
 #: admin/js/admin.js:675 admin/js/admin.js:1057
 msgid "New site URL"
 msgstr "Nouvelle URL du site"
+
+#: admin/js/admin.js:459
+msgid "Next adaptive batch:"
+msgstr "Prochain lot adaptatif :"
 
 #: admin/js/schedule-tab.js:424
 msgid "Next run: "
@@ -1002,6 +1301,9 @@ msgstr "Ouvrez Diagnostics pour examiner la réponse capturée."
 msgid "Open Diagnostics to view the captured response."
 msgstr "Ouvrez Diagnostics pour consulter la réponse capturée."
 
+msgid "Open backups"
+msgstr "Ouvrir les sauvegardes"
+
 #: admin/js/admin.js
 msgid "Open diagnostics"
 msgstr "Ouvrir les diagnostics"
@@ -1017,6 +1319,9 @@ msgstr "Opération en cours"
 msgid "Origin"
 msgstr "Origine"
 
+msgid "Overall progress"
+msgstr "Progression globale"
+
 #: admin/js/admin.js:894
 msgid "PHP Extensions"
 msgstr "Extensions PHP"
@@ -1028,6 +1333,9 @@ msgstr "Délai PHP dépassé. "
 #: admin/js/admin.js:878
 msgid "PHP memory"
 msgstr "Mémoire PHP"
+
+msgid "PHP memory:"
+msgstr "Mémoire PHP :"
 
 #: admin/js/schedule-tab.js:48
 msgid "PHP parse error. "
@@ -1055,9 +1363,22 @@ msgstr "Diagnostics persistants de production"
 msgid "Please enter your Nextcloud server URL."
 msgstr "Saisissez l'URL de votre serveur Nextcloud."
 
+msgid "Portable metadata captured. Final verification is starting."
+msgstr "Métadonnées portables enregistrées. La vérification finale commence."
+
 #: includes/class-exporter.php:1669
 msgid "Portable metadata captured. Finalizing the WPCM container..."
 msgstr "Métadonnées portables enregistrées. Finalisation du conteneur WPCM…"
+
+msgid "Preparation"
+msgstr "Préparation"
+
+msgid "Preparing a reliable export"
+msgstr "Préparation d’un export fiable"
+
+#: includes/class-exporter.php
+msgid "Preparing file batch %1$d of %2$d. Overall: %3$s of %4$s."
+msgstr "Préparation du lot de fichiers %1$d sur %2$d. Progression globale : %3$s sur %4$s."
 
 #: admin/js/admin.js:544 admin/js/admin.js:984
 msgid "Preparing installer…"
@@ -1075,9 +1396,30 @@ msgstr "Traitement en cours, veuillez patienter…"
 msgid "Reading backup…"
 msgstr "Lecture de la sauvegarde…"
 
+msgid "Recalculated continuously"
+msgstr "Recalculé en continu"
+
 #: admin/js/admin.js:1068
 msgid "Recommended after every restore."
 msgstr "Recommandé après chaque restauration."
+
+msgid "Recovery"
+msgstr "Secours"
+
+msgid "Recovery tool"
+msgstr "Outil de récupération"
+
+#: admin/js/admin.js:459
+msgid "Reduced to limit generated SQL volume"
+msgstr "Réduit pour limiter le volume SQL généré"
+
+#: admin/js/admin.js:459
+msgid "Reduced to protect PHP memory"
+msgstr "Réduit pour protéger la mémoire PHP"
+
+#: admin/js/admin.js:459
+msgid "Reduced to stay within the time budget"
+msgstr "Réduit pour respecter le temps cible"
 
 #: admin/js/admin.js:780 admin/js/schedule-tab.js:725
 msgid "Refresh"
@@ -1117,13 +1459,25 @@ msgstr "Restaurer ou migrer votre site"
 msgid "Restore settings"
 msgstr "Paramètres de restauration"
 
+msgid "Restore the site transactionally or store a verified archive in the local backup library without changing this site."
+msgstr ""
+"Restaurez le site de façon transactionnelle ou enregistrez une archive vérifiée dans la bibliothèque locale sans "
+"modifier ce site."
+
 #: admin/js/admin.js:816
 msgid "Restore this backup"
 msgstr "Restaurer cette sauvegarde"
 
+msgid "Restore this site"
+msgstr "Restaurer ce site"
+
 #: admin/js/admin.js:715 admin/js/admin.js:1087
 msgid "Restoring…"
 msgstr "Restauration en cours…"
+
+#: admin/js/admin.js clone-master.php
+msgid "Resuming the upload from "
+msgstr "Reprise de l’envoi depuis "
 
 #: admin/js/schedule-tab.js:430
 msgid "Retention"
@@ -1147,6 +1501,21 @@ msgstr "Réessayer cette section"
 msgid "Retrying in "
 msgstr "Nouvelle tentative dans "
 
+#: admin/js/admin.js:459
+msgid "Rows"
+msgstr "Lignes"
+
+msgid ""
+"Run the dry-run command first. Clone Master intentionally keeps emergency extraction separate from destructive "
+"restoration."
+msgstr ""
+"Exécutez d’abord la commande de simulation. Clone Master sépare volontairement l’extraction d’urgence de toute "
+"restauration destructive."
+
+#: admin/js/admin.js:459
+msgid "SQL"
+msgstr "SQL"
+
 #: admin/js/schedule-tab.js:687
 msgid "Save settings"
 msgstr "Sauvegarder"
@@ -1158,6 +1527,10 @@ msgstr "Sauvegarde en cours…"
 #: includes/class-exporter.php:1243
 msgid "Scanning files durably: %1$d paths indexed, %2$d bounded jobs written."
 msgstr "Scanning files durably: %1$d paths indexed, %2$d bounded jobs written."
+
+#: includes/class-exporter.php
+msgid "Scanning files: %1$d paths indexed, %2$d jobs prepared, %3$d backup location(s) excluded."
+msgstr "Analyse des fichiers : %1$d chemins indexés, %2$d lots préparés, %3$d emplacement(s) de sauvegarde exclus."
 
 #: admin/js/schedule-tab.js:843
 msgid "Schedule"
@@ -1205,6 +1578,9 @@ msgstr "Limites serveur"
 msgid "Session expired or invalid."
 msgstr "Session expirée ou invalide."
 
+msgid "Session initialized. Building the exact site inventory..."
+msgstr "Session initialisée. Création de l’inventaire exact du site…"
+
 #: includes/class-exporter.php:181
 msgid "Session initialized. Exporting database..."
 msgstr "Session initialisée. Export de la base de données…"
@@ -1238,6 +1614,13 @@ msgstr "Taille"
 msgid "Source URL"
 msgstr "URL source"
 
+msgid "Source to archive"
+msgstr "Volume à archiver"
+
+#: admin/js/admin.js:459
+msgid "Stable"
+msgstr "Stable"
+
 #: admin/js/admin.js:351
 msgid "Start full export"
 msgstr "Lancer la sauvegarde"
@@ -1258,10 +1641,20 @@ msgstr "Stockage"
 msgid "Storage result persisted. Applying the local-copy policy."
 msgstr "Storage result persisted. Applying the local-copy policy."
 
+msgid "Store only"
+msgstr "Enregistrer seulement"
+
 #: clone-master.php:582
 #, python-format
 msgid "Stored upload chunk %d failed validation."
 msgstr "Le fragment envoyé %d a échoué à la validation."
+
+#: includes/class-importer.php
+msgid "Structural index complete: %1$s and %2$s entries. Adaptive block validation is starting."
+msgstr "Index structurel terminé : %1$s et %2$s entrées. La validation adaptative des blocs commence."
+
+msgid "Structural index complete: %1$s and %2$s entries. Adaptive verification is starting without extracting the site."
+msgstr "Index structurel terminé : %1$s et %2$s entrées. La vérification adaptative commence sans extraire le site."
 
 #: admin/js/admin.js:1143 admin/js/admin.js:1144 clone-master.php:390
 msgid "Support open-source"
@@ -1302,6 +1695,13 @@ msgstr "Préfixe des tables"
 #: admin/js/admin.js:215
 msgid "Tables exported"
 msgstr "Tables exportées"
+
+msgid "Technical details"
+msgstr "Détails techniques"
+
+#: admin/js/admin.js clone-master.php
+msgid "Temporary upload interruption. Retrying from the confirmed offset with "
+msgstr "Interruption temporaire. Nouvelle tentative depuis la position confirmée avec "
 
 #: includes/class-scheduler.php:644
 msgid ""
@@ -1363,6 +1763,9 @@ msgstr "L’URL doit commencer par https://"
 msgid "The WPCM container is already being analysed."
 msgstr "Le conteneur WPCM est déjà en cours d’analyse."
 
+msgid "The WPCM footer could not be verified after finalization."
+msgstr "Le pied du conteneur WPCM n’a pas pu être vérifié après la finalisation."
+
 #: includes/class-exporter.php:1509
 msgid "The WPCM inventory does not match the durable scan plan."
 msgstr "L’inventaire WPCM ne correspond pas au plan d’analyse durable."
@@ -1386,9 +1789,38 @@ msgstr "La session de sécurité WordPress a expiré. Rechargez la page puis ré
 msgid "The append-only WPCM payload is incomplete."
 msgstr "La charge utile WPCM append-only est incomplète."
 
+msgid "The archive could not be stored."
+msgstr "L’archive n’a pas pu être enregistrée."
+
 #: includes/class-importer.php:176
 msgid "The archive manifest changed after validation."
 msgstr "Le manifeste de l’archive a changé après validation."
+
+msgid "The archive must be fully validated before it can be stored."
+msgstr "L’archive doit être entièrement validée avant de pouvoir être enregistrée."
+
+#: includes/class-importer.php
+msgid "The archive source changed after analysis."
+msgstr "La source de l’archive a changé après l’analyse."
+
+msgid "The archive source changed after validation."
+msgstr "La source de l’archive a changé après sa validation."
+
+msgid "The archive will be fully verified and listed under Backups. The current database and files will remain unchanged."
+msgstr ""
+"L’archive sera entièrement vérifiée et listée dans Sauvegardes. La base de données et les fichiers actuels resteront "
+"inchangés."
+
+msgid "The archived database stream failed SHA-256 validation."
+msgstr "Le flux de base de données archivé a échoué à la validation SHA-256."
+
+#: includes/class-importer.php
+msgid "The authenticated archive analysis plan is missing or invalid."
+msgstr "Le plan d’analyse authentifié de l’archive est absent ou invalide."
+
+#: includes/class-importer.php
+msgid "The authenticated archive extraction state is missing or invalid."
+msgstr "L’état d’extraction authentifié de l’archive est absent ou invalide."
 
 #: includes/class-importer.php:172
 msgid "The authenticated archive validation record is missing or invalid."
@@ -1403,6 +1835,11 @@ msgstr ""
 " Démarrez une nouvelle sauvegarde ; si le problème persiste, consultez les diagnostics plutôt que de purger les "
 "caches à répétition."
 
+msgid "The autonomous recovery kit does not load WordPress, themes or plugins. Run it directly with PHP."
+msgstr ""
+"Le kit de récupération autonome ne charge ni WordPress, ni les thèmes, ni les extensions. Exécutez-le directement "
+"avec PHP."
+
 #: includes/class-scheduler.php:252
 msgid "The backup job exceeded the 24-hour safety limit."
 msgstr "The backup job exceeded the 24-hour safety limit."
@@ -1410,6 +1847,9 @@ msgstr "The backup job exceeded the 24-hour safety limit."
 #: includes/class-scheduler.php:113
 msgid "The backup queue is currently busy."
 msgstr "The backup queue is currently busy."
+
+msgid "The backup was added without restoring the site."
+msgstr "La sauvegarde a été ajoutée sans restaurer le site."
 
 #: clone-master.php:499
 msgid "The chunk is not a valid HTTP upload."
@@ -1451,6 +1891,11 @@ msgstr "Le flux de base de données ne contient pas d’inventaire de tables vé
 #: includes/class-importer.php:183
 msgid "The destination URL must be a valid HTTP or HTTPS URL."
 msgstr "The destination URL must be a valid HTTP or HTTPS URL."
+
+msgid "The download uses a temporary direct server link. A resumable HTTP transfer is used as a fallback."
+msgstr ""
+"Le téléchargement utilise un lien direct temporaire servi par le serveur. Un transfert HTTP reprenable est utilisé en"
+" secours."
 
 #: includes/class-exporter.php:1289
 msgid "The durable SQL export is missing."
@@ -1523,6 +1968,13 @@ msgstr "L’inventaire des fichiers WPCM extraits ne correspond plus au manifest
 msgid "The extracted database stream failed SHA-256 validation."
 msgstr "Le flux de base de données extrait a échoué à la validation SHA-256."
 
+msgid ""
+"The extracted directory contains database.sql and wp-content. Review the paths before importing or copying anything "
+"to production."
+msgstr ""
+"Le répertoire extrait contient database.sql et wp-content. Vérifiez les chemins avant tout import ou toute copie vers"
+" la production."
+
 #: clone-master.php:637
 msgid "The file is not a valid HTTP upload."
 msgstr "The file is not a valid HTTP upload."
@@ -1534,6 +1986,9 @@ msgstr "La somme de contrôle WPCM finale diffère de l’empreinte vérifiée d
 #: includes/class-scheduler.php:481
 msgid "The final WPCM container failed its integrity check."
 msgstr "Le conteneur WPCM final a échoué au contrôle d’intégrité."
+
+msgid "The final WPCM container has an invalid authentication footer."
+msgstr "Le conteneur WPCM final possède un pied d’authentification invalide."
 
 #: includes/class-scheduler.php:475
 msgid "The final archive checksum no longer matches the verified package."
@@ -1564,6 +2019,22 @@ msgstr ""
 "La migration est terminée. Reconnectez-vous à l'interface d'administration WordPress pour vérifier que tout "
 "fonctionne."
 
+#: admin/js/admin.js clone-master.php
+msgid "The partial upload path is unsafe."
+msgstr "Le chemin du fichier d’envoi partiel n’est pas sûr."
+
+#: admin/js/admin.js clone-master.php
+msgid "The partial upload size does not match its authenticated state."
+msgstr "La taille de l’envoi partiel ne correspond pas à son état authentifié."
+
+#: admin/js/admin.js clone-master.php
+msgid "The partial upload was not written completely."
+msgstr "L’envoi partiel n’a pas été écrit intégralement."
+
+#: includes/class-importer.php
+msgid "The pending extraction publication state is invalid."
+msgstr "L’état de publication en attente de l’extraction est invalide."
+
 #: includes/class-scheduler.php:261
 msgid "The persisted backup state has an unknown stage."
 msgstr "The persisted backup state has an unknown stage."
@@ -1576,15 +2047,26 @@ msgstr "The persisted finalization state is invalid."
 msgid "The published WPCM container failed validation."
 msgstr "Le conteneur WPCM publié a échoué à la validation."
 
+msgid "The published WPCM container has an invalid footer."
+msgstr "Le conteneur WPCM publié possède un pied de fichier invalide."
+
 #: includes/class-scheduler.php:465
 msgid "The published backup archive is missing."
 msgstr "The published backup archive is missing."
+
+#: admin/js/admin.js clone-master.php
+msgid "The received archive does not contain a valid finalized WPCM footer."
+msgstr "L’archive reçue ne contient pas de pied WPCM finalisé valide."
 
 msgid "The response body was empty."
 msgstr "Le corps de la réponse était vide."
 
 msgid "The restore step timed out. The signed journal can resume the same step."
 msgstr "L'étape de restauration a dépassé le délai. Le journal signé permet de reprendre la même étape."
+
+#: admin/js/admin.js clone-master.php
+msgid "The resumable upload session was not found."
+msgstr "La session d’envoi reprenable est introuvable."
 
 #: includes/class-exporter.php:813
 #, python-format
@@ -1599,6 +2081,14 @@ msgstr "The saved Nextcloud poll endpoint is no longer safe."
 #, python-format
 msgid "The schema of table %s changed during export. Retry the backup when database schema changes have finished."
 msgstr "The schema of table %s changed during export. Retry the backup when database schema changes have finished."
+
+#: admin/js/admin.js clone-master.php
+msgid "The server did not advance the resumable upload offset."
+msgstr "Le serveur n’a pas fait progresser la position de l’envoi reprenable."
+
+#: admin/js/admin.js clone-master.php
+msgid "The server had already received the interrupted part. Upload resumed without resending it."
+msgstr "Le serveur avait déjà reçu la partie interrompue. L’envoi reprend sans la retransmettre."
 
 #: admin/js/admin.js:486
 msgid ""
@@ -1621,12 +2111,19 @@ msgstr "Le serveur a renvoyé une charge JSON invalide."
 msgid "The server returned an invalid response."
 msgstr "Le serveur a renvoyé une réponse invalide."
 
+#: admin/js/admin.js clone-master.php
+msgid "The server returned an invalid resumable upload offset."
+msgstr "Le serveur a renvoyé une position d’envoi reprenable invalide."
+
 msgid "The server returned an unexpected response."
 msgstr "Le serveur a renvoyé une réponse inattendue."
 
 #: admin/js/admin.js:44
 msgid "The server returned an unexpected response. "
 msgstr "Le serveur a renvoyé une réponse inattendue. "
+
+msgid "The stored archive failed its final size or footer check."
+msgstr "L’archive enregistrée a échoué au contrôle final de taille ou de pied d’archive."
 
 #: clone-master.php:560
 msgid "The stored upload chunk failed SHA-256 validation."
@@ -1645,15 +2142,39 @@ msgstr "L’instantané temporaire de la base de données n’a pas pu être sup
 msgid "The temporary database snapshot name is invalid."
 msgstr "Le nom de l’instantané temporaire de la base de données est invalide."
 
+#: admin/js/admin.js clone-master.php
+msgid "The upload connection was interrupted."
+msgstr "La connexion d’envoi a été interrompue."
+
 msgid "The upload endpoint returned an invalid JSON payload."
 msgstr "Le point d'envoi a renvoyé une charge JSON invalide."
 
 msgid "The upload endpoint returned an invalid response."
 msgstr "Le point d'envoi a renvoyé une réponse invalide."
 
+#: admin/js/admin.js clone-master.php
+msgid "The upload finished without a validated server file path."
+msgstr "L’envoi s’est terminé sans chemin de fichier serveur valide."
+
+#: admin/js/admin.js clone-master.php
+msgid "The upload offset changed. Clone Master can resume from the server position."
+msgstr "La position d’envoi a changé. Clone Master peut reprendre depuis la position du serveur."
+
+#: admin/js/admin.js clone-master.php
+msgid "The upload request ended before the declared chunk size."
+msgstr "La requête d’envoi s’est terminée avant la taille de morceau déclarée."
+
 #: clone-master.php:532
 msgid "The upload session is missing; restart from chunk zero."
 msgstr "La session d’envoi est manquante ; recommencez à partir du fragment zéro."
+
+#: admin/js/admin.js clone-master.php
+msgid "The upload session is missing; resume from the server offset."
+msgstr "La session d’envoi est introuvable ; reprenez depuis la position indiquée par le serveur."
+
+#: admin/js/admin.js clone-master.php
+msgid "The upload was interrupted."
+msgstr "L’envoi a été interrompu."
 
 #: clone-master.php:495
 msgid "The uploaded chunk was rejected by PHP."
@@ -1671,13 +2192,33 @@ msgstr "The uploaded file was rejected by PHP."
 msgid "The validated WPCM database stream is missing."
 msgstr "Le flux de base de données WPCM validé est manquant."
 
+#: includes/class-importer.php
+msgid "The validated WPCM manifest is missing."
+msgstr "Le manifeste WPCM validé est introuvable."
+
+msgid "The validated archive is already being stored."
+msgstr "L’archive validée est déjà en cours d’enregistrement."
+
+msgid "The validated archive no longer matches its authenticated record."
+msgstr "L’archive validée ne correspond plus à son enregistrement authentifié."
+
 #: includes/class-exporter.php:1698
 msgid "The verified WPCM container was already published."
 msgstr "Le conteneur WPCM vérifié était déjà publié."
 
+msgid "The verified WPCM file inventory no longer matches the manifest."
+msgstr "L’inventaire vérifié des fichiers WPCM ne correspond plus au manifeste."
+
+msgid "The verified archive is now available in the Backups section."
+msgstr "L’archive vérifiée est maintenant disponible dans la section Sauvegardes."
+
 #: includes/class-scheduler.php:386
 msgid "The verified remote backup was stored, but the local copy could not be removed."
 msgstr "The verified remote backup was stored, but the local copy could not be removed."
+
+#: admin/js/admin.js clone-master.php
+msgid "This browser cannot create a secure resumable upload identifier."
+msgstr "Ce navigateur ne peut pas créer un identifiant sécurisé d’envoi reprenable."
 
 #: includes/class-importer.php:466
 msgid "This file is not a WP Commander compatible WPCMARCHIVE2 container."
@@ -1713,6 +2254,9 @@ msgstr "Déclencheur"
 msgid "Twice daily"
 msgstr "2 fois par jour"
 
+msgid "URLs will be replaced throughout the database"
+msgstr "Les URL seront remplacées dans toute la base de données"
+
 #: includes/class-backup-settings.php:270
 msgid "Unable to acquire the backup history lock."
 msgstr "Unable to acquire the backup history lock."
@@ -1729,9 +2273,16 @@ msgstr "Unable to allocate a unique export workspace."
 msgid "Unable to atomically label the automatic backup."
 msgstr "Unable to atomically label the automatic backup."
 
+#: includes/class-importer.php
+msgid "Unable to atomically publish a WPCM extraction file."
+msgstr "Impossible de publier atomiquement un fichier extrait de l’archive WPCM."
+
 #: includes/class-exporter.php:1746
 msgid "Unable to atomically publish the WPCM container."
 msgstr "Impossible de publier atomiquement le conteneur WPCM."
+
+msgid "Unable to atomically publish the imported archive."
+msgstr "Impossible de publier atomiquement l’archive importée."
 
 #: clone-master.php:600 clone-master.php:652
 msgid "Unable to atomically publish the uploaded WPCM container."
@@ -1740,6 +2291,15 @@ msgstr "Impossible de publier atomiquement le conteneur WPCM envoyé."
 #: includes/class-exporter.php:855
 msgid "Unable to build a durable database keyset predicate."
 msgstr "Impossible de construire le prédicat de curseur durable de la base de données."
+
+msgid "Unable to calculate the archive checksum."
+msgstr "Impossible de calculer la somme de contrôle de l’archive."
+
+msgid "Unable to calculate the final archive checksum."
+msgstr "Impossible de calculer la somme de contrôle finale de l’archive."
+
+msgid "Unable to calculate the stored archive checksum."
+msgstr "Impossible de calculer l’empreinte de l’archive enregistrée."
 
 #: includes/class-storage-driver.php:475
 msgid "Unable to create or access the configured Nextcloud directory."
@@ -1760,6 +2320,9 @@ msgstr "Impossible de créer le flux durable de base de données."
 #: includes/class-exporter.php:1065
 msgid "Unable to create the durable file queue directory."
 msgstr "Unable to create the durable file queue directory."
+
+msgid "Unable to create the local backup directory."
+msgstr "Impossible de créer le répertoire local des sauvegardes."
 
 #: includes/class-exporter.php:136
 msgid "Unable to create the protected export workspace."
@@ -1819,9 +2382,16 @@ msgstr "Unable to open the backup archive."
 msgid "Unable to open the file."
 msgstr "Unable to open the file."
 
+#: admin/js/admin.js clone-master.php
+msgid "Unable to open the partial WPCM upload."
+msgstr "Impossible d’ouvrir l’envoi WPCM partiel."
+
 #: includes/class-exporter.php:924
 msgid "Unable to prepare a durable database query."
 msgstr "Impossible de préparer une requête durable de base de données."
+
+msgid "Unable to publish the imported archive in the local backup directory."
+msgstr "Impossible de publier l’archive importée dans le répertoire local des sauvegardes."
 
 #: clone-master.php:1095
 #, python-format
@@ -1869,9 +2439,20 @@ msgstr "Unable to read the file."
 msgid "Unable to read the schema for table %s."
 msgstr "Unable to read the schema for table %s."
 
+#: admin/js/admin.js clone-master.php
+msgid "Unable to read the upload request body."
+msgstr "Impossible de lire le corps de la requête d’envoi."
+
+msgid "Unable to read the validated archive while storing it."
+msgstr "Impossible de lire l’archive validée pendant son enregistrement."
+
 #: clone-master.php:585
 msgid "Unable to reopen an upload chunk."
 msgstr "Impossible de rouvrir un fragment envoyé."
+
+#: includes/class-importer.php
+msgid "Unable to resolve the protected import workspace."
+msgstr "Impossible de résoudre l’espace de travail protégé de l’importation."
 
 #: includes/class-exporter.php:1373
 msgid "Unable to restore the database stream checkpoint."
@@ -1893,6 +2474,10 @@ msgstr "Unable to scan directory %s."
 #: includes/class-importer.php:199
 msgid "Unable to secure the installer token."
 msgstr "Unable to secure the installer token."
+
+#: admin/js/admin.js clone-master.php
+msgid "Unable to seek to the resumable upload offset."
+msgstr "Impossible de se positionner à l’octet de reprise."
 
 #: includes/class-exporter.php:1713
 msgid "Unable to verify the database stream before finalization."
@@ -1952,6 +2537,24 @@ msgstr ""
 msgid "Upload complete"
 msgstr "Envoi terminé"
 
+#: admin/js/admin.js
+#, python-format
+msgid "Upload complete: %s received. Building the archive index…"
+msgstr "Envoi terminé : %s reçus. Création de l’index de l’archive…"
+
+#: clone-master.php
+#, python-format
+msgid "Upload complete: %s received. Structural analysis is starting."
+msgstr "Envoi terminé : %s reçus. L’analyse structurelle commence."
+
+#: admin/js/admin.js clone-master.php
+msgid "Upload metadata does not match the resumable session."
+msgstr "Les métadonnées d’envoi ne correspondent pas à la session reprenable."
+
+#: admin/js/admin.js clone-master.php
+msgid "Upload position resynchronized with the server."
+msgstr "Position d’envoi resynchronisée avec le serveur."
+
 #: includes/class-storage-driver.php:633
 msgid "Upload successful."
 msgstr "Upload réussi."
@@ -1964,20 +2567,68 @@ msgstr "Envoi en cours : veuillez ne pas fermer cette page."
 msgid "Uploading archive…"
 msgstr "Envoi de l'archive…"
 
+msgid "Use these commands while WordPress can still bootstrap. The shorter wp wpcm alias is also supported."
+msgstr ""
+"Utilisez ces commandes lorsque WordPress peut encore démarrer. L’alias plus court wp wpcm est également pris en "
+"charge."
+
 #: includes/class-storage-driver.php:534
 msgid "Username is missing."
 msgstr "Nom d'utilisateur manquant."
+
+msgid "Validate the archive, then restore the database and files transactionally."
+msgstr "Valide l’archive, puis restaure la base de données et les fichiers de façon transactionnelle."
 
 #: includes/class-importer.php:164
 msgid "Validated manifest is missing."
 msgstr "Validated manifest is missing."
 
+#: includes/class-importer.php
+#, python-format
+msgid "Validating and extracting: %1$s of %2$s (%3$d%%)."
+msgstr "Validation et extraction : %1$s sur %2$s (%3$d %%)."
+
+msgid "Verification"
+msgstr "Vérification"
+
+msgid "Verify and add the archive to local backups without modifying this site."
+msgstr "Vérifie et ajoute l’archive aux sauvegardes locales sans modifier ce site."
+
+msgid "Verify and store archive"
+msgstr "Vérifier et enregistrer l’archive"
+
+msgid "Verifying and publishing the archive"
+msgstr "Vérification et publication de l’archive"
+
+#, python-format
+msgid "Verifying archive blocks: %1$s of %2$s (%3$d%%)."
+msgstr "Vérification des blocs de l’archive : %1$s sur %2$s (%3$d %%)."
+
 msgid "View diagnostics"
 msgstr "Voir les diagnostics"
+
+msgid "WP-CLI and emergency recovery"
+msgstr "WP-CLI et récupération d’urgence"
+
+msgid "WP-CLI commands"
+msgstr "Commandes WP-CLI"
+
+#: includes/class-importer.php
+#, python-format
+msgid "WPCM archive fully validated and extracted: %s."
+msgstr "Archive WPCM entièrement validée et extraite : %s."
+
+#, python-format
+msgid "WPCM archive fully validated without restoring or extracting the site: %s."
+msgstr "Archive WPCM entièrement validée sans restaurer ni extraire le site : %s."
 
 #: includes/class-importer.php:49
 msgid "WPCM archive not found or unreadable."
 msgstr "Archive WPCM introuvable ou illisible."
+
+#, python-format
+msgid "WPCM container finalized, checksummed, and atomically published: %s"
+msgstr "Conteneur WPCM finalisé, contrôlé et publié de manière atomique : %s"
 
 #: includes/class-exporter.php:1758
 #, python-format
@@ -1991,6 +2642,9 @@ msgstr "Le conteneur WPCM a été entièrement validé bloc par bloc et extrait 
 #: admin/js/schedule-tab.js:620
 msgid "Waiting for authorisation…"
 msgstr "En attente de votre autorisation…"
+
+msgid "WordPress cannot start"
+msgstr "WordPress ne démarre plus"
 
 msgid "WordPress could not determine the authenticated admin origin."
 msgstr "WordPress n'a pas pu déterminer l'origine authentifiée de l'administration."
@@ -2013,6 +2667,9 @@ msgstr "Détails WordPress"
 msgid "WordPress version"
 msgstr "Version de WordPress"
 
+msgid "Worker:"
+msgstr "Traitement :"
+
 #: admin/js/admin.js:911
 msgid "Writable"
 msgstr "Accessible en écriture"
@@ -2020,6 +2677,12 @@ msgstr "Accessible en écriture"
 #: admin/js/admin.js:883
 msgid "Yes"
 msgstr "Oui"
+
+#: admin/js/admin.js clone-master.php
+msgid "You may change tabs. Keep this page open; interrupted uploads can resume after selecting the same archive."
+msgstr ""
+"Vous pouvez changer d’onglet. Gardez cette page ouverte ; en cas d’interruption, resélectionnez la même archive pour "
+"reprendre."
 
 #: admin/js/admin.js:779
 msgid "Your backups"
@@ -2049,6 +2712,10 @@ msgstr "[%1$s] Sauvegarde %2$s réussie"
 msgid "automatic"
 msgstr "automatique"
 
+#: admin/js/admin.js clone-master.php
+msgid "automatic range "
+msgstr "plage automatique "
+
 #: includes/class-storage-driver.php:627
 #, python-format
 msgid "cURL error: %s"
@@ -2062,6 +2729,9 @@ msgstr "appels"
 msgid "complete"
 msgstr "terminé"
 
+msgid "folders"
+msgstr "dossiers"
+
 #: includes/class-scheduler.php:615
 msgid "manual"
 msgstr "manuelle"
@@ -2073,6 +2743,10 @@ msgstr "sur ce serveur."
 #: admin/js/admin.js:238
 msgid "rows/call"
 msgstr "lignes/appel"
+
+#: admin/js/admin.js:459
+msgid "safe ceiling"
+msgstr "plafond sûr"
 
 #: includes/class-storage-driver.php:505
 msgid "single request"
@@ -2090,494 +2764,3 @@ msgstr "Dossier wp-content"
 msgid "← Start over"
 msgstr "← Recommencer"
 
-#: includes/class-exporter.php
-msgid "%1$d paths scanned into %2$d bounded append jobs. %3$d backup location(s) were excluded to prevent nested backups."
-msgstr ""
-"%1$d chemins analysés et répartis dans %2$d lots durables. %3$d emplacement(s) de sauvegarde ont été exclus pour "
-"éviter les sauvegardes imbriquées."
-
-#: includes/class-exporter.php
-msgid "Scanning files: %1$d paths indexed, %2$d jobs prepared, %3$d backup location(s) excluded."
-msgstr "Analyse des fichiers : %1$d chemins indexés, %2$d lots préparés, %3$d emplacement(s) de sauvegarde exclus."
-
-#: includes/class-exporter.php
-#, python-format
-msgid "Last excluded backup location: %s."
-msgstr "Dernier emplacement de sauvegarde exclu : %s."
-
-#: includes/class-exporter.php
-msgid "Archiving database.sql: %1$s of %2$s."
-msgstr "Archivage de database.sql : %1$s sur %2$s."
-
-#: includes/class-exporter.php
-#, python-format
-msgid "Archiving %1$s: %2$s of %3$s (%4$d%%). Overall: %5$s of %6$s."
-msgstr "Archivage de %1$s : %2$s sur %3$s (%4$d %%). Progression globale : %5$s sur %6$s."
-
-#: includes/class-exporter.php
-msgid "Preparing file batch %1$d of %2$d. Overall: %3$s of %4$s."
-msgstr "Préparation du lot de fichiers %1$d sur %2$d. Progression globale : %3$s sur %4$s."
-
-#: admin/js/admin.js:459
-msgid "Increased after two fast, low-resource calls"
-msgstr "Augmentation après deux appels rapides et peu gourmands"
-
-#: admin/js/admin.js:459
-msgid "Measuring server capacity"
-msgstr "Mesure des capacités du serveur"
-
-#: admin/js/admin.js:459
-msgid "Reduced to protect PHP memory"
-msgstr "Réduit pour protéger la mémoire PHP"
-
-#: admin/js/admin.js:459
-msgid "Reduced to stay within the time budget"
-msgstr "Réduit pour respecter le temps cible"
-
-#: admin/js/admin.js:459
-msgid "Reduced to limit generated SQL volume"
-msgstr "Réduit pour limiter le volume SQL généré"
-
-#: admin/js/admin.js:459
-msgid "Limited by the average row size"
-msgstr "Limité par la taille moyenne des lignes"
-
-#: admin/js/admin.js:459
-msgid "Stable"
-msgstr "Stable"
-
-#: admin/js/admin.js:459
-msgid "Current table"
-msgstr "Table actuelle"
-
-#: admin/js/admin.js:459
-msgid "Next adaptive batch:"
-msgstr "Prochain lot adaptatif :"
-
-#: admin/js/admin.js:459
-msgid "Last call"
-msgstr "Dernier appel"
-
-#: admin/js/admin.js:459
-msgid "Rows"
-msgstr "Lignes"
-
-#: admin/js/admin.js:459
-msgid "SQL"
-msgstr "SQL"
-
-#: admin/js/admin.js:459
-msgid "Automatic target:"
-msgstr "Cible automatique :"
-
-#: admin/js/admin.js:459
-msgid "safe ceiling"
-msgstr "plafond sûr"
-
-#: includes/class-exporter.php:1473
-msgid ""
-"A single exported row from table %1$s requires %2$s of SQL, above the safe MySQL packet allowance of %3$s. Increase "
-"max_allowed_packet before creating a portable backup."
-msgstr ""
-"Une ligne exportée de la table %1$s nécessite %2$s de SQL, au-dessus de la limite MySQL sûre de %3$s. Augmentez "
-"max_allowed_packet avant de créer une sauvegarde portable."
-
-msgid "%1$s backup location(s) excluded%2$s."
-msgstr "%1$s emplacement(s) de sauvegarde exclu(s)%2$s."
-
-msgid "Accelerated download"
-msgstr "Téléchargement accéléré"
-
-msgid "Archive creation"
-msgstr "Création de l’archive"
-
-msgid "Archive creation complete."
-msgstr "Création de l’archive terminée."
-
-msgid "Available during archiving"
-msgstr "Disponible pendant l’archivage"
-
-msgid "Backup complete"
-msgstr "Sauvegarde terminée"
-
-msgid "Backup locations from other migration plugins are excluded automatically to avoid nested archives."
-msgstr ""
-"Les emplacements de sauvegarde des autres extensions de migration sont exclus automatiquement pour éviter les "
-"archives imbriquées."
-
-msgid "Building the exact site inventory"
-msgstr "Création de l’inventaire exact du site"
-
-msgid "Calculating…"
-msgstr "Calcul en cours…"
-
-msgid ""
-"Clone Master first builds a durable inventory, then creates and verifies the archive with workers adapted to your "
-"hosting."
-msgstr ""
-"Clone Master crée d’abord un inventaire durable, puis génère et vérifie l’archive avec des traitements adaptés à "
-"votre hébergement."
-
-msgid "Creating the archive"
-msgstr "Création de l’archive"
-
-msgid "Current file progress:"
-msgstr "Progression du fichier actuel :"
-
-msgid "Current file:"
-msgstr "Fichier actuel :"
-
-msgid "Current speed"
-msgstr "Débit actuel"
-
-msgid "Elapsed time"
-msgstr "Temps écoulé"
-
-msgid "Estimated time remaining"
-msgstr "Temps restant estimé"
-
-msgid "Exact inventory"
-msgstr "Inventaire exact"
-
-msgid "Exact inventory complete."
-msgstr "Inventaire exact terminé."
-
-msgid "Exact inventory completed"
-msgstr "Inventaire exact terminé"
-
-msgid "Exact value"
-msgstr "Valeur exacte"
-
-msgid "Export stages"
-msgstr "Étapes de l’export"
-
-msgid "Exporting the database"
-msgstr "Export de la base de données"
-
-msgid "Files"
-msgstr "Fichiers"
-
-msgid "Inventory in progress"
-msgstr "Inventaire en cours"
-
-msgid "Measured on this server"
-msgstr "Mesuré sur ce serveur"
-
-msgid "Overall progress"
-msgstr "Progression globale"
-
-msgid "PHP memory:"
-msgstr "Mémoire PHP :"
-
-msgid "Preparation"
-msgstr "Préparation"
-
-msgid "Preparing a reliable export"
-msgstr "Préparation d’un export fiable"
-
-msgid "Recalculated continuously"
-msgstr "Recalculé en continu"
-
-msgid "Source to archive"
-msgstr "Volume à archiver"
-
-msgid "Technical details"
-msgstr "Détails techniques"
-
-msgid "The download uses a temporary direct server link. A resumable HTTP transfer is used as a fallback."
-msgstr ""
-"Le téléchargement utilise un lien direct temporaire servi par le serveur. Un transfert HTTP reprenable est utilisé en"
-" secours."
-
-msgid "Verification"
-msgstr "Vérification"
-
-msgid "Verifying and publishing the archive"
-msgstr "Vérification et publication de l’archive"
-
-msgid "Worker:"
-msgstr "Traitement :"
-
-msgid "folders"
-msgstr "dossiers"
-
-msgid "Portable metadata captured. Final verification is starting."
-msgstr "Métadonnées portables enregistrées. La vérification finale commence."
-
-msgid "The published WPCM container has an invalid footer."
-msgstr "Le conteneur WPCM publié possède un pied de fichier invalide."
-
-msgid "The WPCM footer could not be verified after finalization."
-msgstr "Le pied du conteneur WPCM n’a pas pu être vérifié après la finalisation."
-
-msgid "Unable to calculate the final archive checksum."
-msgstr "Impossible de calculer la somme de contrôle finale de l’archive."
-
-msgid "Unable to calculate the archive checksum."
-msgstr "Impossible de calculer la somme de contrôle de l’archive."
-
-#, python-format
-msgid "WPCM container finalized, checksummed, and atomically published: %s"
-msgstr "Conteneur WPCM finalisé, contrôlé et publié de manière atomique : %s"
-
-msgid "The final WPCM container has an invalid authentication footer."
-msgstr "Le conteneur WPCM final possède un pied d’authentification invalide."
-
-msgid "Session initialized. Building the exact site inventory..."
-msgstr "Session initialisée. Création de l’inventaire exact du site…"
-
-#, python-format
-msgid "%d table exported with durable immutable chunks. The exact source total is ready."
-msgstr "%d table exportée avec des fragments durables immuables. Le volume source exact est disponible."
-
-#, python-format
-msgid "%d tables exported with durable immutable chunks. The exact source total is ready."
-msgstr "%d tables exportées avec des fragments durables immuables. Le volume source exact est disponible."
-
-#: admin/js/admin.js clone-master.php
-msgid "%1$s received of %2$s."
-msgstr "%1$s reçus sur %2$s."
-
-#: admin/js/admin.js clone-master.php
-msgid "A new upload must start at byte zero."
-msgstr "Un nouvel envoi doit commencer à l’octet zéro."
-
-#: admin/js/admin.js clone-master.php
-msgid "Archive already received and ready for validation."
-msgstr "Archive déjà reçue et prête pour la validation."
-
-#: admin/js/admin.js clone-master.php
-msgid "Invalid resumable upload metadata or request size."
-msgstr "Métadonnées de reprise ou taille de requête invalides."
-
-#: admin/js/admin.js clone-master.php
-msgid "The partial upload path is unsafe."
-msgstr "Le chemin du fichier d’envoi partiel n’est pas sûr."
-
-#: admin/js/admin.js clone-master.php
-msgid "The partial upload size does not match its authenticated state."
-msgstr "La taille de l’envoi partiel ne correspond pas à son état authentifié."
-
-#: admin/js/admin.js clone-master.php
-msgid "The partial upload was not written completely."
-msgstr "L’envoi partiel n’a pas été écrit intégralement."
-
-#: admin/js/admin.js clone-master.php
-msgid "The received archive does not contain a valid finalized WPCM footer."
-msgstr "L’archive reçue ne contient pas de pied WPCM finalisé valide."
-
-#: admin/js/admin.js clone-master.php
-msgid "The resumable upload session was not found."
-msgstr "La session d’envoi reprenable est introuvable."
-
-#: admin/js/admin.js clone-master.php
-msgid "The upload offset changed. Clone Master can resume from the server position."
-msgstr "La position d’envoi a changé. Clone Master peut reprendre depuis la position du serveur."
-
-#: admin/js/admin.js clone-master.php
-msgid "The upload request ended before the declared chunk size."
-msgstr "La requête d’envoi s’est terminée avant la taille de morceau déclarée."
-
-#: admin/js/admin.js clone-master.php
-msgid "The upload session is missing; resume from the server offset."
-msgstr "La session d’envoi est introuvable ; reprenez depuis la position indiquée par le serveur."
-
-#: admin/js/admin.js clone-master.php
-msgid "Unable to open the partial WPCM upload."
-msgstr "Impossible d’ouvrir l’envoi WPCM partiel."
-
-#: admin/js/admin.js clone-master.php
-msgid "Unable to read the upload request body."
-msgstr "Impossible de lire le corps de la requête d’envoi."
-
-#: admin/js/admin.js clone-master.php
-msgid "Unable to seek to the resumable upload offset."
-msgstr "Impossible de se positionner à l’octet de reprise."
-
-#: admin/js/admin.js clone-master.php
-msgid "Upload metadata does not match the resumable session."
-msgstr "Les métadonnées d’envoi ne correspondent pas à la session reprenable."
-
-#: admin/js/admin.js clone-master.php
-msgid "%1$s / %2$s · %3$s Mbit/s · about %4$s remaining"
-msgstr "%1$s sur %2$s · %3$s Mbit/s · reste environ %4$s"
-
-#: admin/js/admin.js clone-master.php
-msgid "Adaptive chunk adjusted to "
-msgstr "Morceau adaptatif ajusté à "
-
-#: admin/js/admin.js clone-master.php
-msgid "Adaptive resumable upload: starting at "
-msgstr "Envoi reprenable adaptatif : démarrage à "
-
-#: admin/js/admin.js clone-master.php
-msgid "GiB"
-msgstr "Gio"
-
-#: admin/js/admin.js clone-master.php
-msgid "HTTP 413: adaptive chunk reduced to "
-msgstr "HTTP 413 : morceau adaptatif réduit à "
-
-#: admin/js/admin.js clone-master.php
-msgid "MiB"
-msgstr "Mio"
-
-#: admin/js/admin.js clone-master.php
-msgid "Resuming the upload from "
-msgstr "Reprise de l’envoi depuis "
-
-#: admin/js/admin.js clone-master.php
-msgid "Temporary upload interruption. Retrying from the confirmed offset with "
-msgstr "Interruption temporaire. Nouvelle tentative depuis la position confirmée avec "
-
-#: admin/js/admin.js clone-master.php
-msgid "The server did not advance the resumable upload offset."
-msgstr "Le serveur n’a pas fait progresser la position de l’envoi reprenable."
-
-#: admin/js/admin.js clone-master.php
-msgid "The server had already received the interrupted part. Upload resumed without resending it."
-msgstr "Le serveur avait déjà reçu la partie interrompue. L’envoi reprend sans la retransmettre."
-
-#: admin/js/admin.js clone-master.php
-msgid "The server returned an invalid resumable upload offset."
-msgstr "Le serveur a renvoyé une position d’envoi reprenable invalide."
-
-#: admin/js/admin.js clone-master.php
-msgid "The upload connection was interrupted."
-msgstr "La connexion d’envoi a été interrompue."
-
-#: admin/js/admin.js clone-master.php
-msgid "The upload finished without a validated server file path."
-msgstr "L’envoi s’est terminé sans chemin de fichier serveur valide."
-
-#: admin/js/admin.js clone-master.php
-msgid "The upload was interrupted."
-msgstr "L’envoi a été interrompu."
-
-#: admin/js/admin.js clone-master.php
-msgid "This browser cannot create a secure resumable upload identifier."
-msgstr "Ce navigateur ne peut pas créer un identifiant sécurisé d’envoi reprenable."
-
-#: admin/js/admin.js clone-master.php
-msgid "Upload position resynchronized with the server."
-msgstr "Position d’envoi resynchronisée avec le serveur."
-
-#: admin/js/admin.js clone-master.php
-msgid "automatic range "
-msgstr "plage automatique "
-
-#: admin/js/admin.js clone-master.php
-msgid "You may change tabs. Keep this page open; interrupted uploads can resume after selecting the same archive."
-msgstr ""
-"Vous pouvez changer d’onglet. Gardez cette page ouverte ; en cas d’interruption, resélectionnez la même archive pour "
-"reprendre."
-
-#: admin/js/admin.js
-msgid ""
-"Drop your .wpcm file or click to select it. Large files use a resumable adaptive transfer that adjusts automatically "
-"to the server."
-msgstr ""
-"Déposez votre fichier .wpcm ou cliquez pour le sélectionner. Les fichiers volumineux utilisent un transfert adaptatif"
-" reprenable qui s’ajuste automatiquement au serveur."
-
-#: admin/js/admin.js clone-master.php includes/class-importer.php
-msgid "%1$s (%2$s bytes)"
-msgstr "%1$s (%2$s octets)"
-
-#: includes/class-importer.php
-msgid "A completed WPCM extraction file is missing."
-msgstr "Un fichier d’extraction WPCM terminé est introuvable."
-
-#: includes/class-importer.php
-msgid "A pending WPCM extraction path escaped its protected root."
-msgstr "Un chemin de publication WPCM en attente est sorti de l’espace protégé."
-
-#: includes/class-importer.php
-msgid "A published WPCM extraction file has an unexpected size."
-msgstr "Un fichier WPCM publié possède une taille inattendue."
-
-#: admin/js/admin.js
-msgid "Adaptive archive validation in progress…"
-msgstr "Validation adaptative de l’archive en cours…"
-
-#: admin/js/admin.js
-#, python-format
-msgid "Adaptive validation block adjusted to %s."
-msgstr "Bloc de validation adaptatif ajusté à %s."
-
-#: admin/js/admin.js
-msgid "Archive structure indexed. Adaptive validation is starting."
-msgstr "Structure de l’archive indexée. La validation adaptative commence."
-
-#: admin/js/admin.js
-msgid "Archive validation completed."
-msgstr "Validation de l’archive terminée."
-
-#: admin/js/admin.js
-#, python-format
-msgid "Archive validation: %d%%."
-msgstr "Validation de l’archive : %d %%."
-
-#: admin/js/admin.js
-msgid "Building the archive structural index…"
-msgstr "Création de l’index structurel de l’archive…"
-
-#: admin/js/admin.js
-msgid "Building the backup structural index…"
-msgstr "Création de l’index structurel de la sauvegarde…"
-
-#: includes/class-importer.php
-msgid "KiB"
-msgstr "Kio"
-
-#: includes/class-importer.php
-msgid "Structural index complete: %1$s and %2$s entries. Adaptive block validation is starting."
-msgstr "Index structurel terminé : %1$s et %2$s entrées. La validation adaptative des blocs commence."
-
-#: includes/class-importer.php
-msgid "The archive source changed after analysis."
-msgstr "La source de l’archive a changé après l’analyse."
-
-#: includes/class-importer.php
-msgid "The authenticated archive analysis plan is missing or invalid."
-msgstr "Le plan d’analyse authentifié de l’archive est absent ou invalide."
-
-#: includes/class-importer.php
-msgid "The authenticated archive extraction state is missing or invalid."
-msgstr "L’état d’extraction authentifié de l’archive est absent ou invalide."
-
-#: includes/class-importer.php
-msgid "The pending extraction publication state is invalid."
-msgstr "L’état de publication en attente de l’extraction est invalide."
-
-#: includes/class-importer.php
-msgid "The validated WPCM manifest is missing."
-msgstr "Le manifeste WPCM validé est introuvable."
-
-#: includes/class-importer.php
-msgid "Unable to atomically publish a WPCM extraction file."
-msgstr "Impossible de publier atomiquement un fichier extrait de l’archive WPCM."
-
-#: includes/class-importer.php
-msgid "Unable to resolve the protected import workspace."
-msgstr "Impossible de résoudre l’espace de travail protégé de l’importation."
-
-#: admin/js/admin.js
-#, python-format
-msgid "Upload complete: %s received. Building the archive index…"
-msgstr "Envoi terminé : %s reçus. Création de l’index de l’archive…"
-
-#: clone-master.php
-#, python-format
-msgid "Upload complete: %s received. Structural analysis is starting."
-msgstr "Envoi terminé : %s reçus. L’analyse structurelle commence."
-
-#: includes/class-importer.php
-#, python-format
-msgid "Validating and extracting: %1$s of %2$s (%3$d%%)."
-msgstr "Validation et extraction : %1$s sur %2$s (%3$d %%)."
-
-#: includes/class-importer.php
-#, python-format
-msgid "WPCM archive fully validated and extracted: %s."
-msgstr "Archive WPCM entièrement validée et extraite : %s."

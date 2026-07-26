@@ -529,36 +529,40 @@ function wpcm_runtime_memory_limit_bytes() {
 function wpcm_initial_worker_budget() {
     $configured = (int) ini_get( 'max_execution_time' );
     $reference  = $configured > 0 ? $configured : 30;
-    return max( 3.0, min( 7.0, $reference * 0.18 ) );
+    return max( 8.0, min( 20.0, $reference * 0.35 ) );
 }
 
 function wpcm_adapt_worker_budget( $worker, $duration, $processed, $completed_naturally ) {
     $worker = is_array( $worker ) ? $worker : array();
-    $budget = max( 2.5, min( 10.0, (float) ( $worker['time_budget'] ?? wpcm_initial_worker_budget() ) ) );
+    $budget = max( 6.0, min( 20.0, (float) ( $worker['time_budget'] ?? wpcm_initial_worker_budget() ) ) );
     $streak = max( 0, (int) ( $worker['growth_streak'] ?? 0 ) );
     $limit  = wpcm_runtime_memory_limit_bytes();
     $peak   = memory_get_peak_usage( true );
     $ratio  = $limit > 0 ? $peak / $limit : 0.0;
     $reason = 'stable';
 
-    if ( $limit > 0 && $ratio >= 0.82 ) {
-        $budget = max( 2.5, $budget * 0.65 );
+    if ( $limit > 0 && $ratio >= 0.86 ) {
+        $budget = max( 6.0, $budget * 0.60 );
         $streak = 0;
         $reason = 'reduced_memory';
-    } elseif ( $duration >= $budget * 1.25 ) {
-        $budget = max( 2.5, $budget * 0.82 );
+    } elseif ( $duration > $budget * 1.30 ) {
+        $budget = max( 6.0, $budget * 0.82 );
         $streak = 0;
         $reason = 'reduced_time';
-    } elseif ( ! $completed_naturally && $processed > 0 && $duration <= $budget * 1.10 && $ratio < 0.68 ) {
+    } elseif ( ! $completed_naturally && $processed > 0 && $duration < $budget * 0.78 && $ratio < 0.72 ) {
         $streak++;
         $reason = 'learning';
         if ( $streak >= 2 ) {
-            $budget = min( 10.0, $budget * 1.25 );
+            $budget = min( 20.0, $budget * 1.20 );
             $streak = 0;
             $reason = 'increased';
         }
-    } else {
+    } elseif ( $duration >= $budget * 0.70 ) {
+        // Reaching the normal worker budget is expected. Keep it stable rather
+        // than treating the cooperative yield as a server-side slowdown.
         $streak = 0;
+    } else {
+        $streak = max( 0, $streak - 1 );
     }
 
     return array(
@@ -583,10 +587,138 @@ function wpcm_format_binary_bytes( $bytes ) {
 // Database staging.
 // -----------------------------------------------------------------------------
 
+function wpcm_database_journal_table( $cfg ) {
+    return 'wpcm_restore_journal_' . substr( hash( 'sha256', (string) ( $cfg['restore_id'] ?? '' ) ), 0, 16 );
+}
+
+function wpcm_database_journal_create( $mysqli, $cfg, $reset = false ) {
+    $table = wpcm_database_journal_table( $cfg );
+    if ( $reset && ! $mysqli->query( 'DROP TABLE IF EXISTS ' . wpcm_quote_identifier( $table ) ) ) {
+        throw new RuntimeException( 'Unable to reset the database restore journal: ' . $mysqli->error );
+    }
+    $sql = 'CREATE TABLE IF NOT EXISTS ' . wpcm_quote_identifier( $table ) . ' ('
+        . '`id` tinyint unsigned NOT NULL,'
+        . '`file_index` int unsigned NOT NULL DEFAULT 0,'
+        . '`byte_offset` bigint unsigned NOT NULL DEFAULT 0,'
+        . '`queries_applied` bigint unsigned NOT NULL DEFAULT 0,'
+        . '`schema_hashes` longtext NOT NULL,'
+        . '`updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,'
+        . 'PRIMARY KEY (`id`)'
+        . ') ENGINE=InnoDB';
+    if ( ! $mysqli->query( $sql ) ) {
+        throw new RuntimeException( 'Unable to create the database restore journal: ' . $mysqli->error );
+    }
+    if ( $reset && ! $mysqli->query( 'INSERT INTO ' . wpcm_quote_identifier( $table ) . " (`id`,`file_index`,`byte_offset`,`queries_applied`,`schema_hashes`) VALUES (1,0,0,0,'{}')" ) ) {
+        throw new RuntimeException( 'Unable to initialize the database restore journal: ' . $mysqli->error );
+    }
+    return $table;
+}
+
+function wpcm_database_journal_read( $mysqli, $table ) {
+    $result = $mysqli->query( 'SELECT `file_index`,`byte_offset`,`queries_applied`,`schema_hashes` FROM ' . wpcm_quote_identifier( $table ) . ' WHERE `id`=1' );
+    if ( ! $result ) {
+        throw new RuntimeException( 'Unable to read the database restore journal: ' . $mysqli->error );
+    }
+    $row = $result->fetch_assoc();
+    $result->free();
+    if ( ! is_array( $row ) ) {
+        return array( 'file_index' => 0, 'byte_offset' => 0, 'queries' => 0, 'schema_hashes' => array() );
+    }
+    $schema_hashes = json_decode( (string) ( $row['schema_hashes'] ?? '' ), true );
+    if ( ! is_array( $schema_hashes ) ) {
+        $schema_hashes = array();
+    }
+    return array(
+        'file_index'    => max( 0, (int) $row['file_index'] ),
+        'byte_offset'   => max( 0, (int) $row['byte_offset'] ),
+        'queries'       => max( 0, (int) $row['queries_applied'] ),
+        'schema_hashes' => $schema_hashes,
+    );
+}
+
+function wpcm_database_journal_update( $mysqli, $table, $file_index, $byte_offset, $queries, $schema_hashes = array() ) {
+    $schema_json = json_encode( is_array( $schema_hashes ) ? $schema_hashes : array(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+    if ( ! is_string( $schema_json ) ) {
+        throw new RuntimeException( 'Unable to encode the database schema checkpoint.' );
+    }
+    // Use a hexadecimal SQL literal so the checkpoint remains independent of
+    // NO_BACKSLASH_ESCAPES, connection collations, and JSON punctuation.
+    $schema_sql = '0x' . bin2hex( $schema_json );
+    $sql = 'INSERT INTO ' . wpcm_quote_identifier( $table )
+        . ' (`id`,`file_index`,`byte_offset`,`queries_applied`,`schema_hashes`) VALUES (1,'
+        . (int) $file_index . ',' . (int) $byte_offset . ',' . (int) $queries . ',' . $schema_sql . ')'
+        . ' ON DUPLICATE KEY UPDATE `file_index`=VALUES(`file_index`),`byte_offset`=VALUES(`byte_offset`),`queries_applied`=VALUES(`queries_applied`),`schema_hashes`=VALUES(`schema_hashes`)';
+    if ( ! $mysqli->query( $sql ) ) {
+        throw new RuntimeException( 'Unable to update the database restore journal: ' . $mysqli->error );
+    }
+}
+
+function wpcm_extract_insert_table_name( $statement ) {
+    if ( preg_match( '/^\s*INSERT\s+(?:IGNORE\s+)?INTO\s+`([^`]+)`/i', (string) $statement, $match ) ) {
+        return (string) $match[1];
+    }
+    return '';
+}
+
+function wpcm_database_table_engine( $mysqli, $table, &$cache ) {
+    if ( isset( $cache[ $table ] ) ) {
+        return (string) $cache[ $table ];
+    }
+    $escaped = $mysqli->real_escape_string( $table );
+    $result  = $mysqli->query( "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='{$escaped}' LIMIT 1" );
+    if ( ! $result ) {
+        throw new RuntimeException( 'Unable to inspect the staged table engine: ' . $mysqli->error );
+    }
+    $row = $result->fetch_assoc();
+    $result->free();
+    $cache[ $table ] = is_array( $row ) ? strtoupper( (string) ( $row['ENGINE'] ?? '' ) ) : '';
+    return (string) $cache[ $table ];
+}
+
+function wpcm_flush_database_insert_batch( $mysqli, $journal_table, &$batch, &$state ) {
+    if ( empty( $batch['statements'] ) ) {
+        return;
+    }
+    if ( ! $mysqli->query( 'START TRANSACTION' ) ) {
+        throw new RuntimeException( 'Unable to start the staged database transaction: ' . $mysqli->error );
+    }
+    try {
+        foreach ( $batch['statements'] as $statement ) {
+            if ( ! $mysqli->query( $statement ) ) {
+                throw new RuntimeException( 'SQL staging failed [' . $mysqli->errno . ']: ' . $mysqli->error );
+            }
+        }
+        $new_queries = (int) $state['db']['queries'] + count( $batch['statements'] );
+        wpcm_database_journal_update(
+            $mysqli,
+            $journal_table,
+            (int) $batch['file_index'],
+            (int) $batch['byte_offset'],
+            $new_queries,
+            (array) ( $state['db']['schema_portable_hashes'] ?? array() )
+        );
+        if ( ! $mysqli->query( 'COMMIT' ) ) {
+            throw new RuntimeException( 'Unable to commit the staged database transaction: ' . $mysqli->error );
+        }
+        $state['db']['queries']     = $new_queries;
+        $state['db']['file_index']  = (int) $batch['file_index'];
+        $state['db']['byte_offset'] = (int) $batch['byte_offset'];
+    } catch ( Throwable $error ) {
+        $mysqli->query( 'ROLLBACK' );
+        throw $error;
+    }
+    $batch = array(
+        'statements'  => array(),
+        'bytes'       => 0,
+        'file_index'  => (int) $state['db']['file_index'],
+        'byte_offset' => (int) $state['db']['byte_offset'],
+    );
+}
+
 function wpcm_step_database( $cfg, &$state, $token ) {
-    $started       = microtime( true );
-    $database_path = rtrim( $cfg['session_dir'], '/\\' ) . '/database.sql';
-    $sql_files = is_file( $database_path ) ? array( $database_path ) : array();
+    $started        = microtime( true );
+    $database_path  = rtrim( $cfg['session_dir'], '/\\' ) . '/database.sql';
+    $sql_files      = is_file( $database_path ) ? array( $database_path ) : array();
     $database_total = is_file( $database_path ) ? max( 1, (int) @filesize( $database_path ) ) : 1;
     if ( empty( $sql_files ) ) {
         throw new RuntimeException( 'database.sql is missing from the validated WPCM container.' );
@@ -612,6 +744,7 @@ function wpcm_step_database( $cfg, &$state, $token ) {
                 throw new RuntimeException( 'Unable to remove stale staging table: ' . $error );
             }
         }
+        $journal_table = wpcm_database_journal_create( $mysqli, $cfg, true );
         $state['phase'] = 'staging_database';
         $state['db']    = array(
             'file_index'      => 0,
@@ -627,6 +760,8 @@ function wpcm_step_database( $cfg, &$state, $token ) {
             ),
         );
         wpcm_save_state( $cfg, $state, $token );
+    } else {
+        $journal_table = wpcm_database_journal_create( $mysqli, $cfg, false );
     }
 
     if ( ! in_array( $state['phase'], array( 'staging_database', 'validating_database', 'database_staged' ), true ) ) {
@@ -634,9 +769,10 @@ function wpcm_step_database( $cfg, &$state, $token ) {
         throw new RuntimeException( 'Database staging was requested in an invalid restore phase.' );
     }
     $worker      = is_array( $state['db']['worker'] ?? null ) ? $state['db']['worker'] : array();
-    $time_budget = max( 2.5, min( 10.0, (float) ( $worker['time_budget'] ?? wpcm_initial_worker_budget() ) ) );
+    $time_budget = max( 6.0, min( 20.0, (float) ( $worker['time_budget'] ?? wpcm_initial_worker_budget() ) ) );
 
     if ( 'database_staged' === $state['phase'] ) {
+        $mysqli->query( 'DROP TABLE IF EXISTS ' . wpcm_quote_identifier( $journal_table ) );
         $mysqli->close();
         return array(
             'file_index' => count( $sql_files ),
@@ -650,9 +786,35 @@ function wpcm_step_database( $cfg, &$state, $token ) {
     }
 
     if ( 'staging_database' === $state['phase'] ) {
-        $file_index = (int) ( $state['db']['file_index'] ?? 0 );
-        $offset     = (int) ( $state['db']['byte_offset'] ?? 0 );
-        $request_start_offset = $offset;
+        $db_checkpoint = wpcm_database_journal_read( $mysqli, $journal_table );
+        $state_file_index = (int) ( $state['db']['file_index'] ?? 0 );
+        $state_offset     = (int) ( $state['db']['byte_offset'] ?? 0 );
+        $state_queries    = (int) ( $state['db']['queries'] ?? 0 );
+        $journal_is_ahead = $db_checkpoint['file_index'] > $state_file_index
+            || ( $db_checkpoint['file_index'] === $state_file_index && $db_checkpoint['byte_offset'] > $state_offset )
+            || ( $db_checkpoint['file_index'] === $state_file_index && $db_checkpoint['byte_offset'] === $state_offset && $db_checkpoint['queries'] > $state_queries );
+        if ( $journal_is_ahead ) {
+            $state['db']['file_index']  = $db_checkpoint['file_index'];
+            $state['db']['byte_offset'] = $db_checkpoint['byte_offset'];
+            $state['db']['queries']     = $db_checkpoint['queries'];
+        }
+        if ( ! empty( $db_checkpoint['schema_hashes'] ) ) {
+            $state['db']['schema_portable_hashes'] = array_merge(
+                (array) ( $state['db']['schema_portable_hashes'] ?? array() ),
+                (array) $db_checkpoint['schema_hashes']
+            );
+        }
+
+        $file_index          = (int) ( $state['db']['file_index'] ?? 0 );
+        $offset              = (int) ( $state['db']['byte_offset'] ?? 0 );
+        $request_start_offset= $offset;
+        $engine_cache        = array();
+        $batch               = array(
+            'statements'  => array(),
+            'bytes'       => 0,
+            'file_index'  => $file_index,
+            'byte_offset' => $offset,
+        );
 
         while ( $file_index < count( $sql_files ) ) {
             $path = $sql_files[ $file_index ];
@@ -667,9 +829,9 @@ function wpcm_step_database( $cfg, &$state, $token ) {
                 throw new RuntimeException( 'Unable to resume SQL file: ' . basename( $path ) );
             }
 
-            $buffer = '';
+            $buffer    = '';
             $in_string = false;
-            $escaped = false;
+            $escaped   = false;
             while ( ! feof( $fh ) ) {
                 $line_start = ftell( $fh );
                 $line       = fgets( $fh, 1048576 );
@@ -701,12 +863,12 @@ function wpcm_step_database( $cfg, &$state, $token ) {
                         continue;
                     }
                     if ( ';' === $char && ! $in_string ) {
-                        $statement = trim( $buffer );
-                        $buffer    = '';
-                        $offset    = $line_start + $i + 1;
-                        if ( '' !== $statement ) {
-                            $source_statement = $statement;
-                            $source_table     = wpcm_extract_create_table_name( $source_statement );
+                        $source_statement = trim( $buffer );
+                        $buffer           = '';
+                        $offset           = $line_start + $i + 1;
+
+                        if ( '' !== $source_statement ) {
+                            $source_table = wpcm_extract_create_table_name( $source_statement );
                             if ( '' !== $source_table ) {
                                 if ( ! isset( $expected_by_name[ $source_table ] ) ) {
                                     fclose( $fh );
@@ -733,20 +895,41 @@ function wpcm_step_database( $cfg, &$state, $token ) {
                                 );
                             }
 
-                            $statement = wpcm_rewrite_statement_for_staging( $source_statement, $cfg );
-                            if ( '' !== $statement && ! $mysqli->query( $statement ) ) {
-                                $error = $mysqli->error;
-                                $errno = $mysqli->errno;
-                                fclose( $fh );
-                                $mysqli->close();
-                                throw new RuntimeException( 'SQL staging failed [' . $errno . ']: ' . $error );
+                            $statement   = wpcm_rewrite_statement_for_staging( $source_statement, $cfg );
+                            $insert_table= '' !== $statement ? wpcm_extract_insert_table_name( $statement ) : '';
+                            $batchable   = '' !== $insert_table && 'INNODB' === wpcm_database_table_engine( $mysqli, $insert_table, $engine_cache );
+
+                            if ( $batchable ) {
+                                $batch['statements'][] = $statement;
+                                $batch['bytes']       += strlen( $statement );
+                                $batch['file_index']   = $file_index;
+                                $batch['byte_offset']  = $offset;
+                                if ( count( $batch['statements'] ) >= 32 || $batch['bytes'] >= 16 * 1024 * 1024 || ( microtime( true ) - $started ) >= $time_budget * 0.90 ) {
+                                    wpcm_flush_database_insert_batch( $mysqli, $journal_table, $batch, $state );
+                                }
+                            } elseif ( '' !== $statement ) {
+                                wpcm_flush_database_insert_batch( $mysqli, $journal_table, $batch, $state );
+                                if ( ! $mysqli->query( $statement ) ) {
+                                    $errno = (int) $mysqli->errno;
+                                    // A CREATE TABLE may have completed immediately before a
+                                    // process interruption. Replaying it is safe when the staged
+                                    // table already exists and the schema is validated later.
+                                    if ( 1050 !== $errno || '' === $source_table ) {
+                                        $error = $mysqli->error;
+                                        fclose( $fh );
+                                        $mysqli->close();
+                                        throw new RuntimeException( 'SQL staging failed [' . $errno . ']: ' . $error );
+                                    }
+                                }
+                                $state['db']['queries'] = (int) $state['db']['queries'] + 1;
+                                $state['db']['file_index']  = $file_index;
+                                $state['db']['byte_offset'] = $offset;
+                                wpcm_database_journal_update( $mysqli, $journal_table, $file_index, $offset, (int) $state['db']['queries'], (array) ( $state['db']['schema_portable_hashes'] ?? array() ) );
                             }
-                            $state['db']['queries'] = (int) $state['db']['queries'] + 1;
-                            $state['db']['file_index'] = $file_index;
-                            $state['db']['byte_offset'] = $offset;
-                            wpcm_save_state( $cfg, $state, $token );
                         }
+
                         if ( ( microtime( true ) - $started ) >= $time_budget ) {
+                            wpcm_flush_database_insert_batch( $mysqli, $journal_table, $batch, $state );
                             fclose( $fh );
                             $duration  = max( 0.001, microtime( true ) - $started );
                             $processed = max( 0, $offset - $request_start_offset );
@@ -769,7 +952,7 @@ function wpcm_step_database( $cfg, &$state, $token ) {
                                 'throughput_bps'   => $speed,
                                 'adaptive_budget'  => (float) $state['db']['worker']['time_budget'],
                                 'adaptive_reason'  => (string) $state['db']['worker']['last_reason'],
-                                'message'           => 'Importing database: ' . wpcm_format_binary_bytes( $offset ) . ' of ' . wpcm_format_binary_bytes( $database_total ) . ' (' . (int) floor( $ratio * 100 ) . '%), ' . (int) $state['db']['queries'] . ' statements applied.',
+                                'message'          => 'Importing database: ' . wpcm_format_binary_bytes( $offset ) . ' of ' . wpcm_format_binary_bytes( $database_total ) . ' (' . (int) floor( $ratio * 100 ) . '%), ' . (int) $state['db']['queries'] . ' statements applied.',
                             );
                         }
                         continue;
@@ -777,6 +960,7 @@ function wpcm_step_database( $cfg, &$state, $token ) {
                     $buffer .= $char;
                 }
             }
+            wpcm_flush_database_insert_batch( $mysqli, $journal_table, $batch, $state );
             fclose( $fh );
             if ( '' !== trim( $buffer ) ) {
                 $mysqli->close();
@@ -786,18 +970,19 @@ function wpcm_step_database( $cfg, &$state, $token ) {
             $offset = 0;
             $state['db']['file_index']  = $file_index;
             $state['db']['byte_offset'] = 0;
+            wpcm_database_journal_update( $mysqli, $journal_table, $file_index, 0, (int) $state['db']['queries'], (array) ( $state['db']['schema_portable_hashes'] ?? array() ) );
             wpcm_save_state( $cfg, $state, $token );
         }
 
-        $duration = max( 0.001, microtime( true ) - $started );
+        $duration  = max( 0.001, microtime( true ) - $started );
         $processed = max( 0, $database_total - $request_start_offset );
         $state['db']['worker'] = wpcm_adapt_worker_budget( $worker, $duration, $processed, true );
         $state['phase'] = 'validating_database';
         $state['db']['validation_index'] = 0;
         wpcm_save_state( $cfg, $state, $token );
-        $worker = $state['db']['worker'];
-        $time_budget = max( 2.5, min( 10.0, (float) $worker['time_budget'] ) );
-        $started = microtime( true );
+        $worker      = $state['db']['worker'];
+        $time_budget = max( 6.0, min( 20.0, (float) $worker['time_budget'] ) );
+        $started     = microtime( true );
     }
 
     $actual_tables = wpcm_tables_with_prefix( $mysqli, $cfg['staging_prefix'] );
@@ -814,7 +999,7 @@ function wpcm_step_database( $cfg, &$state, $token ) {
         }
         $expected_stage_names[] = $cfg['staging_prefix'] . substr( $source_name, strlen( $cfg['old_prefix'] ) );
     }
-    $actual_sorted = $actual_tables;
+    $actual_sorted   = $actual_tables;
     $expected_sorted = $expected_stage_names;
     sort( $actual_sorted );
     sort( $expected_sorted );
@@ -823,7 +1008,8 @@ function wpcm_step_database( $cfg, &$state, $token ) {
         throw new RuntimeException( 'Staged database table set does not exactly match the validated manifest.' );
     }
 
-    $validation_index = (int) ( $state['db']['validation_index'] ?? 0 );
+    $validation_index      = (int) ( $state['db']['validation_index'] ?? 0 );
+    $validation_checkpoint = $validation_index;
     while ( $validation_index < count( $expected ) ) {
         $meta        = $expected[ $validation_index ];
         $source_name = (string) $meta['name'];
@@ -855,18 +1041,12 @@ function wpcm_step_database( $cfg, &$state, $token ) {
         $create_result->free();
         $raw_create_sql = (string) ( $create_row[1] ?? '' );
 
-        // Retain the strict comparison first. It detects any byte-level schema
-        // change when the source and destination servers render SHOW CREATE in
-        // the same way.
         $legacy_create_sql = preg_replace( '/^CREATE TABLE `' . preg_quote( $stage_name, '/' ) . '`/i', 'CREATE TABLE `' . $source_name . '`', $raw_create_sql );
         $legacy_create_sql = preg_replace( '/\s+AUTO_INCREMENT=\d+/i', '', trim( (string) $legacy_create_sql ) );
         $legacy_hash       = hash( 'sha256', $legacy_create_sql );
         $expected_hash     = (string) ( $meta['schema_hash'] ?? '' );
         $schema_matches    = '' === $expected_hash || hash_equals( $expected_hash, $legacy_hash );
 
-        // MariaDB can preserve staging prefixes in referenced table names and
-        // constraint symbols. Normalize those identifiers before considering
-        // portable server representations.
         $canonical_sql  = '';
         $canonical_hash = '';
         $portable_hash  = '';
@@ -879,97 +1059,65 @@ function wpcm_step_database( $cfg, &$state, $token ) {
             $canonical_sql  = wpcm_normalize_staged_create_table_for_hash( $raw_create_sql, $cfg );
             $canonical_hash = hash( 'sha256', $canonical_sql );
             $schema_matches = hash_equals( $expected_hash, $canonical_hash );
-
             if ( $schema_matches ) {
-                wpcm_debug_log(
-                    $cfg,
-                    'warning',
-                    'installer_schema_prefix_normalized',
-                    array(
-                        'table'          => $source_name,
-                        'expected_hash'  => $expected_hash,
-                        'legacy_hash'    => $legacy_hash,
-                        'canonical_hash' => $canonical_hash,
-                    )
-                );
-            }
-        }
-
-        // MySQL and MariaDB may serialize the same BINARY default differently.
-        // A common example is sixteen escaped zero bytes versus x'0000...'.
-        // Compare a second, narrowly portable hash that normalizes only those
-        // equivalent binary-literal representations.
-        if ( ! $schema_matches && '' !== $expected_portable_hash ) {
-            if ( '' === $canonical_sql ) {
-                $canonical_sql = wpcm_normalize_staged_create_table_for_hash( $raw_create_sql, $cfg );
-            }
-            $portable_hash = hash( 'sha256', wpcm_normalize_create_table_portable_for_hash( $canonical_sql ) );
-            $schema_matches = hash_equals( $expected_portable_hash, $portable_hash );
-
-            if ( $schema_matches ) {
-                wpcm_debug_log(
-                    $cfg,
-                    'warning',
-                    'installer_schema_binary_default_normalized',
-                    array(
-                        'table'                  => $source_name,
-                        'expected_hash'          => $expected_hash,
-                        'legacy_hash'            => $legacy_hash,
-                        'canonical_hash'         => $canonical_hash,
-                        'expected_portable_hash' => $expected_portable_hash,
-                        'portable_hash'          => $portable_hash,
-                    )
-                );
-            }
-        }
-
-        if ( $schema_matches && (int) ( $cfg['staging_rewrite_version'] ?? 1 ) < 2 ) {
-            wpcm_debug_log(
-                $cfg,
-                'error',
-                'installer_legacy_staging_restart_required',
-                array(
+                wpcm_debug_log( $cfg, 'warning', 'installer_schema_prefix_normalized', array(
                     'table'          => $source_name,
                     'expected_hash'  => $expected_hash,
                     'legacy_hash'    => $legacy_hash,
                     'canonical_hash' => $canonical_hash,
-                    'portable_hash'  => $portable_hash,
-                )
-            );
-            $mysqli->close();
-            throw new RuntimeException( 'This restore session was staged by an older SQL identifier rewriter. Start over with the updated plugin so the database can be staged safely.' );
+                ) );
+            }
         }
 
-        if ( ! $schema_matches ) {
-            if ( '' === $expected_portable_hash ) {
-                wpcm_debug_log(
-                    $cfg,
-                    'error',
-                    'installer_schema_portable_hash_missing',
-                    array(
-                        'table'          => $source_name,
-                        'expected_hash'  => $expected_hash,
-                        'legacy_hash'    => $legacy_hash,
-                        'canonical_hash' => $canonical_hash,
-                    )
-                );
-                $mysqli->close();
-                throw new RuntimeException( 'This restore session started before portable schema validation was available. Restart the restore with the updated plugin so the database can be staged and verified safely.' );
+        if ( ! $schema_matches && '' !== $expected_portable_hash ) {
+            if ( '' === $canonical_sql ) {
+                $canonical_sql = wpcm_normalize_staged_create_table_for_hash( $raw_create_sql, $cfg );
             }
-
-            wpcm_debug_log(
-                $cfg,
-                'error',
-                'installer_schema_hash_mismatch',
-                array(
+            $portable_hash  = hash( 'sha256', wpcm_normalize_create_table_portable_for_hash( $canonical_sql ) );
+            $schema_matches = hash_equals( $expected_portable_hash, $portable_hash );
+            if ( $schema_matches ) {
+                wpcm_debug_log( $cfg, 'warning', 'installer_schema_binary_default_normalized', array(
                     'table'                  => $source_name,
                     'expected_hash'          => $expected_hash,
                     'legacy_hash'            => $legacy_hash,
                     'canonical_hash'         => $canonical_hash,
                     'expected_portable_hash' => $expected_portable_hash,
                     'portable_hash'          => $portable_hash,
-                )
-            );
+                ) );
+            }
+        }
+
+        if ( $schema_matches && (int) ( $cfg['staging_rewrite_version'] ?? 1 ) < 2 ) {
+            wpcm_debug_log( $cfg, 'error', 'installer_legacy_staging_restart_required', array(
+                'table'          => $source_name,
+                'expected_hash'  => $expected_hash,
+                'legacy_hash'    => $legacy_hash,
+                'canonical_hash' => $canonical_hash,
+                'portable_hash'  => $portable_hash,
+            ) );
+            $mysqli->close();
+            throw new RuntimeException( 'This restore session was staged by an older SQL identifier rewriter. Start over with the updated plugin so the database can be staged safely.' );
+        }
+
+        if ( ! $schema_matches ) {
+            if ( '' === $expected_portable_hash ) {
+                wpcm_debug_log( $cfg, 'error', 'installer_schema_portable_hash_missing', array(
+                    'table'          => $source_name,
+                    'expected_hash'  => $expected_hash,
+                    'legacy_hash'    => $legacy_hash,
+                    'canonical_hash' => $canonical_hash,
+                ) );
+                $mysqli->close();
+                throw new RuntimeException( 'This restore session started before portable schema validation was available. Restart the restore with the updated plugin so the database can be staged and verified safely.' );
+            }
+            wpcm_debug_log( $cfg, 'error', 'installer_schema_hash_mismatch', array(
+                'table'                  => $source_name,
+                'expected_hash'          => $expected_hash,
+                'legacy_hash'            => $legacy_hash,
+                'canonical_hash'         => $canonical_hash,
+                'expected_portable_hash' => $expected_portable_hash,
+                'portable_hash'          => $portable_hash,
+            ) );
             $mysqli->close();
             throw new RuntimeException( 'Staged schema checksum mismatch for table ' . $source_name . '.' );
         }
@@ -981,11 +1129,14 @@ function wpcm_step_database( $cfg, &$state, $token ) {
 
         $validation_index++;
         $state['db']['validation_index'] = $validation_index;
-        wpcm_save_state( $cfg, $state, $token );
+        if ( 0 === $validation_index % 25 ) {
+            wpcm_save_state( $cfg, $state, $token );
+            $validation_checkpoint = $validation_index;
+        }
 
         if ( ( microtime( true ) - $started ) >= $time_budget ) {
             $duration = max( 0.001, microtime( true ) - $started );
-            $state['db']['worker'] = wpcm_adapt_worker_budget( $worker, $duration, $validation_index, false );
+            $state['db']['worker'] = wpcm_adapt_worker_budget( $worker, $duration, $validation_index - $validation_checkpoint, false );
             wpcm_save_state( $cfg, $state, $token );
             $mysqli->close();
             return array(
@@ -1003,9 +1154,10 @@ function wpcm_step_database( $cfg, &$state, $token ) {
         }
     }
 
-    $state['phase'] = 'database_staged';
+    $state['phase']             = 'database_staged';
     $state['db']['table_count'] = count( $actual_tables );
     wpcm_save_state( $cfg, $state, $token );
+    $mysqli->query( 'DROP TABLE IF EXISTS ' . wpcm_quote_identifier( $journal_table ) );
     $mysqli->close();
 
     return array(
@@ -1447,10 +1599,22 @@ function wpcm_step_replace_urls( $cfg, &$state, $token ) {
         throw new RuntimeException( 'URL replacement was requested in an invalid restore phase.' );
     }
     if ( 'urls_replaced' === $state['phase'] ) {
-        return array( 'table_index' => (int) $state['replace']['table_index'], 'row_offset' => 0, 'rows' => (int) $state['replace']['rows'], 'cells' => (int) $state['replace']['cells'], 'serial' => (int) $state['replace']['serialized'], 'next_step' => 'finalize', 'progress' => 85, 'message' => 'URL replacement already completed.' );
+        return array(
+            'table_index' => (int) ( $state['replace']['table_index'] ?? 0 ),
+            'row_offset'  => 0,
+            'rows'        => (int) ( $state['replace']['rows'] ?? 0 ),
+            'cells'       => (int) ( $state['replace']['cells'] ?? 0 ),
+            'serial'      => (int) ( $state['replace']['serialized'] ?? 0 ),
+            'next_step'   => 'finalize',
+            'progress'    => 85,
+            'message'     => 'URL replacement already completed.',
+        );
     }
-    $state['phase'] = 'replacing_urls';
-    wpcm_save_state( $cfg, $state, $token );
+    if ( 'files_staged' === $state['phase'] ) {
+        $state['phase'] = 'replacing_urls';
+        $state['replace']['strategy_version'] = 2;
+        wpcm_save_state( $cfg, $state, $token );
+    }
 
     $mysqli = wpcm_db_connect( $cfg );
     $pairs  = wpcm_build_replacement_pairs( $cfg );
@@ -1469,15 +1633,23 @@ function wpcm_step_replace_urls( $cfg, &$state, $token ) {
         $expected_rows[ $stage_name ] = $rows;
         $total_rows += $rows;
     }
-    $table_index = (int) ( $state['replace']['table_index'] ?? 0 );
+
+    foreach ( array( 'rows', 'cells', 'serialized', 'scanned', 'candidates' ) as $counter ) {
+        $state['replace'][ $counter ] = max( 0, (int) ( $state['replace'][ $counter ] ?? 0 ) );
+    }
+    if ( ! isset( $state['replace']['skipped'] ) || ! is_array( $state['replace']['skipped'] ) ) {
+        $state['replace']['skipped'] = array();
+    }
+
+    $table_index = max( 0, (int) ( $state['replace']['table_index'] ?? 0 ) );
     $last_key    = $state['replace']['last_key'] ?? null;
-    $page_size   = max( 25, min( 2000, (int) ( $state['replace']['page_size'] ?? 100 ) ) );
+    $page_size   = max( 100, min( 10000, (int) ( $state['replace']['page_size'] ?? 1000 ) ) );
     $page_streak = max( 0, (int) ( $state['replace']['growth_streak'] ?? 0 ) );
     $worker      = array(
-        'time_budget'   => (float) ( $state['replace']['time_budget'] ?? 4.0 ),
+        'time_budget'   => (float) ( $state['replace']['time_budget'] ?? wpcm_initial_worker_budget() ),
         'growth_streak' => (int) ( $state['replace']['worker_growth_streak'] ?? 0 ),
     );
-    $time_budget = max( 2.5, min( 10.0, (float) $worker['time_budget'] ) );
+    $time_budget = max( 6.0, min( 20.0, (float) $worker['time_budget'] ) );
     $started      = microtime( true );
     $selected_this_request = 0;
 
@@ -1486,61 +1658,65 @@ function wpcm_step_replace_urls( $cfg, &$state, $token ) {
         $meta  = $schema[ $table ];
         if ( empty( $meta['key_columns'] ) || empty( $meta['columns'] ) ) {
             $state['replace']['skipped'][] = $table;
-            $state['replace']['scanned'] = (int) ( $state['replace']['scanned'] ?? 0 ) + (int) ( $expected_rows[ $table ] ?? 0 );
+            $state['replace']['scanned']  += (int) ( $expected_rows[ $table ] ?? 0 );
             $table_index++;
             $last_key = null;
             $state['replace']['table_index'] = $table_index;
-            $state['replace']['last_key'] = null;
-            wpcm_save_state( $cfg, $state, $token );
+            $state['replace']['last_key']    = null;
             continue;
         }
 
         $page_started = microtime( true );
-        $result = wpcm_replace_table_page( $mysqli, $table, $meta, $pairs, $last_key, $page_size );
+        $result        = wpcm_replace_table_page( $mysqli, $table, $meta, $pairs, $last_key, $page_size );
         $page_duration = max( 0.001, microtime( true ) - $page_started );
-        $selected_this_request += (int) $result['selected'];
+        $selected      = (int) $result['selected'];
+        $selected_this_request       += $selected;
+        $state['replace']['candidates'] += $selected;
 
         $memory_limit = wpcm_runtime_memory_limit_bytes();
         $memory_ratio = $memory_limit > 0 ? memory_get_peak_usage( true ) / $memory_limit : 0.0;
         $page_reason  = 'stable';
-        if ( $memory_limit > 0 && $memory_ratio >= 0.82 ) {
-            $page_size   = max( 25, (int) floor( $page_size * 0.55 ) );
+        if ( $memory_limit > 0 && $memory_ratio >= 0.84 ) {
+            $page_size   = max( 100, (int) floor( $page_size * 0.50 ) );
             $page_streak = 0;
             $page_reason = 'reduced_memory';
-        } elseif ( $page_duration >= 2.5 ) {
-            $page_size   = max( 25, (int) floor( $page_size * 0.65 ) );
+        } elseif ( $page_duration > 4.5 ) {
+            $page_size   = max( 100, (int) floor( $page_size * 0.65 ) );
             $page_streak = 0;
             $page_reason = 'reduced_time';
-        } elseif ( (int) $result['selected'] >= $page_size && $page_duration < 0.75 && $memory_ratio < 0.68 ) {
+        } elseif ( $selected >= $page_size && $page_duration < 1.5 && $memory_ratio < 0.72 ) {
             $page_streak++;
             $page_reason = 'learning';
             if ( $page_streak >= 2 ) {
-                $page_size   = min( 2000, (int) ceil( $page_size * 1.5 ) );
+                $page_size   = min( 10000, (int) ceil( $page_size * 1.60 ) );
                 $page_streak = 0;
                 $page_reason = 'increased';
             }
-        } else {
+        } elseif ( $page_duration >= 2.5 ) {
             $page_streak = 0;
+        } else {
+            $page_streak = max( 0, $page_streak - 1 );
         }
-        $page_size = max( 25, min( 2000, (int) ( floor( $page_size / 25 ) * 25 ) ) );
+        $page_size = max( 100, min( 10000, (int) ( floor( $page_size / 100 ) * 100 ) ) );
         $state['replace']['page_size']     = $page_size;
         $state['replace']['growth_streak'] = $page_streak;
         $state['replace']['last_reason']   = $page_reason;
         $state['replace']['last_page_ms']  = (int) round( $page_duration * 1000 );
 
-        $state['replace']['scanned']   = (int) ( $state['replace']['scanned'] ?? 0 ) + (int) $result['selected'];
-        $state['replace']['rows']      = (int) $state['replace']['rows'] + $result['rows'];
-        $state['replace']['cells']     = (int) $state['replace']['cells'] + $result['cells'];
-        $state['replace']['serialized']= (int) $state['replace']['serialized'] + $result['serialized'];
+        $state['replace']['rows']       += (int) $result['rows'];
+        $state['replace']['cells']      += (int) $result['cells'];
+        $state['replace']['serialized'] += (int) $result['serialized'];
         if ( $result['done'] ) {
+            // Exact global progress advances only after the complete table has
+            // been searched. Candidate rows are tracked separately.
+            $state['replace']['scanned'] += (int) ( $expected_rows[ $table ] ?? 0 );
             $table_index++;
             $last_key = null;
         } else {
             $last_key = $result['last_key'];
         }
         $state['replace']['table_index'] = $table_index;
-        $state['replace']['last_key'] = $last_key;
-        wpcm_save_state( $cfg, $state, $token );
+        $state['replace']['last_key']    = $last_key;
 
         if ( ( microtime( true ) - $started ) >= $time_budget ) {
             $duration = max( 0.001, microtime( true ) - $started );
@@ -1557,14 +1733,15 @@ function wpcm_step_replace_urls( $cfg, &$state, $token ) {
                 'cells'             => (int) $state['replace']['cells'],
                 'serial'            => (int) $state['replace']['serialized'],
                 'next_step'         => 'replace_urls',
-                'progress'          => 65 + (int) floor( min( 1, (int) ( $state['replace']['scanned'] ?? 0 ) / max( $total_rows, 1 ) ) * 20 ),
+                'progress'          => 65 + (int) floor( min( 1, (int) $state['replace']['scanned'] / max( $total_rows, 1 ) ) * 20 ),
                 'page_size'         => $page_size,
                 'duration_ms'       => (int) round( $duration * 1000 ),
                 'adaptive_budget'   => (float) $adapted['time_budget'],
                 'adaptive_reason'   => (string) $state['replace']['last_reason'],
-                'scanned_rows'      => (int) ( $state['replace']['scanned'] ?? 0 ),
+                'scanned_rows'      => (int) $state['replace']['scanned'],
+                'candidate_rows'    => (int) $state['replace']['candidates'],
                 'total_rows'        => $total_rows,
-                'message'           => 'Replacing URLs: ' . number_format( (int) ( $state['replace']['scanned'] ?? 0 ), 0, '.', ',' ) . ' of ' . number_format( $total_rows, 0, '.', ',' ) . ' rows scanned; adaptive page ' . $page_size . '. Existing tables are still untouched.',
+                'message'           => 'Replacing URLs: table ' . $table_index . '/' . count( $tables ) . '; ' . number_format( (int) $state['replace']['candidates'], 0, '.', ',' ) . ' matching rows processed; adaptive page ' . $page_size . '. Existing tables are still untouched.',
             );
         }
     }
@@ -1573,20 +1750,28 @@ function wpcm_step_replace_urls( $cfg, &$state, $token ) {
     $mysqli->close();
     $state['phase'] = 'urls_replaced';
     $state['replace']['table_index'] = count( $tables );
-    $state['replace']['last_key'] = null;
+    $state['replace']['last_key']    = null;
+    $state['replace']['scanned']     = $total_rows;
     wpcm_save_state( $cfg, $state, $token );
     return array(
-        'table_index' => count( $tables ), 'row_offset' => 0, 'rows' => (int) $state['replace']['rows'], 'cells' => (int) $state['replace']['cells'], 'serial' => (int) $state['replace']['serialized'],
-        'next_step' => 'finalize', 'progress' => 85,
-        'message' => 'URL replacement completed in staged tables. Ready for transactional promotion.',
+        'table_index' => count( $tables ),
+        'row_offset'  => 0,
+        'rows'        => (int) $state['replace']['rows'],
+        'cells'       => (int) $state['replace']['cells'],
+        'serial'      => (int) $state['replace']['serialized'],
+        'next_step'   => 'finalize',
+        'progress'    => 85,
+        'message'     => 'URL replacement completed in staged tables. Ready for transactional promotion.',
     );
 }
 
 function wpcm_replacement_schema( $mysqli, $prefix ) {
     $prefix_esc = $mysqli->real_escape_string( $prefix );
     $prefix_len = strlen( $prefix );
-    $sql = "SELECT c.TABLE_NAME,c.COLUMN_NAME,c.DATA_TYPE,c.CHARACTER_MAXIMUM_LENGTH,c.ORDINAL_POSITION
+    $sql = "SELECT c.TABLE_NAME,c.COLUMN_NAME,c.DATA_TYPE,c.CHARACTER_MAXIMUM_LENGTH,c.ORDINAL_POSITION,t.ENGINE
             FROM information_schema.COLUMNS c
+            INNER JOIN information_schema.TABLES t
+                ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME AND t.TABLE_TYPE='BASE TABLE'
             WHERE c.TABLE_SCHEMA=DATABASE() AND LEFT(c.TABLE_NAME,{$prefix_len})='{$prefix_esc}'
               AND c.DATA_TYPE IN ('char','varchar','tinytext','text','mediumtext','longtext','enum','set')
             ORDER BY c.TABLE_NAME,c.ORDINAL_POSITION";
@@ -1599,6 +1784,7 @@ function wpcm_replacement_schema( $mysqli, $prefix ) {
         $table = $row['TABLE_NAME'];
         $schema[ $table ]['columns'][] = $row['COLUMN_NAME'];
         $schema[ $table ]['max'][ $row['COLUMN_NAME'] ] = null === $row['CHARACTER_MAXIMUM_LENGTH'] ? PHP_INT_MAX : (int) $row['CHARACTER_MAXIMUM_LENGTH'];
+        $schema[ $table ]['engine'] = strtoupper( (string) ( $row['ENGINE'] ?? '' ) );
     }
     $result->free();
 
@@ -1717,66 +1903,115 @@ function wpcm_keyset_sql( $mysqli, array $columns, array $encoded, $relation ) {
     return '(' . implode( ' OR ', $terms ) . ')';
 }
 
-function wpcm_replace_table_page( $mysqli, $table, $meta, $pairs, $last_key, $limit ) {
-    $limit       = max( 25, min( 2000, (int) $limit ) );
-    $key_columns = array_values( $meta['key_columns'] );
-    $columns     = $meta['columns'];
-    $select_columns = array_values( array_unique( array_merge( $key_columns, $columns ) ) );
-    $select = implode( ',', array_map( 'wpcm_quote_identifier', $select_columns ) );
-    $where  = null === $last_key ? '' : ' WHERE ' . wpcm_keyset_sql( $mysqli, $key_columns, $last_key, 'after' );
-    $order  = implode( ',', array_map( function ( $column ) { return wpcm_quote_identifier( $column ) . ' ASC'; }, $key_columns ) );
-    $query  = 'SELECT ' . $select . ' FROM ' . wpcm_quote_identifier( $table ) . $where . ' ORDER BY ' . $order . ' LIMIT ' . $limit;
-    $result = $mysqli->query( $query );
-    if ( ! $result ) throw new RuntimeException( 'Unable to read staged table ' . $table . ': ' . $mysqli->error );
-    $rows = 0; $cells = 0; $serialized = 0; $last = $last_key;
-    while ( $row = $result->fetch_assoc() ) {
-        $row_key = wpcm_extract_resume_key( $row, $key_columns, $table );
-        $last    = $row_key;
-        $updates = array();
-        foreach ( $columns as $column ) {
-            if ( ! isset( $row[ $column ] ) || ! is_string( $row[ $column ] ) || '' === $row[ $column ] ) continue;
-            $changed = false;
-            foreach ( $pairs as $pair ) {
-                if ( false !== strpos( $row[ $column ], $pair[0] ) ) { $changed = true; break; }
-            }
-            if ( ! $changed ) continue;
-            try {
-                $new_value = wpcm_replace_value( $row[ $column ], $pairs, $serialized );
-            } catch ( Throwable $error ) {
-                throw new RuntimeException(
-                    'URL replacement failed in staged table ' . $table . ', column ' . $column . ': ' . $error->getMessage(),
-                    0,
-                    $error
-                );
-            }
-            if ( $new_value === $row[ $column ] ) continue;
-            $max = $meta['max'][ $column ] ?? PHP_INT_MAX;
-            if ( $max < PHP_INT_MAX && strlen( $new_value ) > $max ) continue;
-            $updates[ $column ] = $new_value;
-        }
-        if ( ! empty( $updates ) ) {
-            $parts = array();
-            foreach ( $updates as $column => $value ) {
-                $parts[] = wpcm_quote_identifier( $column ) . "='" . $mysqli->real_escape_string( $value ) . "'";
-            }
-            $sql = 'UPDATE ' . wpcm_quote_identifier( $table ) . ' SET ' . implode( ',', $parts ) . ' WHERE ' . wpcm_keyset_sql( $mysqli, $key_columns, $row_key, 'exact' ) . ' LIMIT 1';
-            if ( ! $mysqli->query( $sql ) ) {
-                if ( 1062 !== $mysqli->errno ) {
-                    $result->free();
-                    throw new RuntimeException( 'URL replacement failed in ' . $table . ': ' . $mysqli->error );
-                }
-                // A unique-key collision is skipped rather than deleting another row.
-            } else {
-                $rows++;
-                $cells += count( $updates );
-            }
+function wpcm_replacement_candidate_sql( $mysqli, array $columns, array $pairs ) {
+    $needles = array();
+    foreach ( $pairs as $pair ) {
+        $needle = isset( $pair[0] ) ? (string) $pair[0] : '';
+        if ( '' !== $needle ) {
+            $needles[ $needle ] = true;
         }
     }
+    if ( empty( $needles ) || empty( $columns ) ) {
+        return '';
+    }
+
+    $terms = array();
+    foreach ( $columns as $column ) {
+        $identifier = wpcm_quote_identifier( $column );
+        foreach ( array_keys( $needles ) as $needle ) {
+            // LOCATE avoids LIKE wildcard ambiguity for percent-encoded URLs
+            // while BINARY preserves byte-for-byte, case-sensitive matching.
+            $terms[] = 'LOCATE(BINARY ' . wpcm_sql_literal( $mysqli, $needle ) . ', BINARY ' . $identifier . ')>0';
+        }
+    }
+    return '(' . implode( ' OR ', $terms ) . ')';
+}
+
+function wpcm_replace_table_page( $mysqli, $table, $meta, $pairs, $last_key, $limit ) {
+    $limit       = max( 100, min( 10000, (int) $limit ) );
+    $key_columns = array_values( $meta['key_columns'] );
+    $columns     = $meta['columns'];
+    $candidate   = wpcm_replacement_candidate_sql( $mysqli, $columns, $pairs );
+    if ( '' === $candidate ) {
+        return array( 'done' => true, 'last_key' => $last_key, 'rows' => 0, 'cells' => 0, 'serialized' => 0, 'selected' => 0 );
+    }
+
+    $select_columns = array_values( array_unique( array_merge( $key_columns, $columns ) ) );
+    $select = implode( ',', array_map( 'wpcm_quote_identifier', $select_columns ) );
+    $where_parts = array( $candidate );
+    if ( null !== $last_key ) {
+        $where_parts[] = wpcm_keyset_sql( $mysqli, $key_columns, $last_key, 'after' );
+    }
+    $where = ' WHERE ' . implode( ' AND ', $where_parts );
+    $order = implode( ',', array_map( function ( $column ) { return wpcm_quote_identifier( $column ) . ' ASC'; }, $key_columns ) );
+    $query = 'SELECT ' . $select . ' FROM ' . wpcm_quote_identifier( $table ) . $where . ' ORDER BY ' . $order . ' LIMIT ' . $limit;
+    $result = $mysqli->query( $query );
+    if ( ! $result ) throw new RuntimeException( 'Unable to read staged table ' . $table . ': ' . $mysqli->error );
+
+    $transactional = 'INNODB' === strtoupper( (string) ( $meta['engine'] ?? '' ) );
+    if ( $transactional && $result->num_rows > 0 && ! $mysqli->query( 'START TRANSACTION' ) ) {
+        $result->free();
+        throw new RuntimeException( 'Unable to start URL replacement transaction for ' . $table . ': ' . $mysqli->error );
+    }
+
+    $rows = 0; $cells = 0; $serialized = 0; $last = $last_key;
+    try {
+        while ( $row = $result->fetch_assoc() ) {
+            $row_key = wpcm_extract_resume_key( $row, $key_columns, $table );
+            $last    = $row_key;
+            $updates = array();
+            foreach ( $columns as $column ) {
+                if ( ! isset( $row[ $column ] ) || ! is_string( $row[ $column ] ) || '' === $row[ $column ] ) continue;
+                $changed = false;
+                foreach ( $pairs as $pair ) {
+                    if ( false !== strpos( $row[ $column ], $pair[0] ) ) { $changed = true; break; }
+                }
+                if ( ! $changed ) continue;
+                try {
+                    $new_value = wpcm_replace_value( $row[ $column ], $pairs, $serialized );
+                } catch ( Throwable $error ) {
+                    throw new RuntimeException(
+                        'URL replacement failed in staged table ' . $table . ', column ' . $column . ': ' . $error->getMessage(),
+                        0,
+                        $error
+                    );
+                }
+                if ( $new_value === $row[ $column ] ) continue;
+                $max = $meta['max'][ $column ] ?? PHP_INT_MAX;
+                if ( $max < PHP_INT_MAX && strlen( $new_value ) > $max ) continue;
+                $updates[ $column ] = $new_value;
+            }
+            if ( ! empty( $updates ) ) {
+                $parts = array();
+                foreach ( $updates as $column => $value ) {
+                    $parts[] = wpcm_quote_identifier( $column ) . "='" . $mysqli->real_escape_string( $value ) . "'";
+                }
+                $sql = 'UPDATE ' . wpcm_quote_identifier( $table ) . ' SET ' . implode( ',', $parts ) . ' WHERE ' . wpcm_keyset_sql( $mysqli, $key_columns, $row_key, 'exact' ) . ' LIMIT 1';
+                if ( ! $mysqli->query( $sql ) ) {
+                    if ( 1062 !== $mysqli->errno ) {
+                        throw new RuntimeException( 'URL replacement failed in ' . $table . ': ' . $mysqli->error );
+                    }
+                } else {
+                    $rows++;
+                    $cells += count( $updates );
+                }
+            }
+        }
+        if ( $transactional && $result->num_rows > 0 && ! $mysqli->query( 'COMMIT' ) ) {
+            throw new RuntimeException( 'Unable to commit URL replacement transaction for ' . $table . ': ' . $mysqli->error );
+        }
+    } catch ( Throwable $error ) {
+        if ( $transactional ) {
+            $mysqli->query( 'ROLLBACK' );
+        }
+        $result->free();
+        throw $error;
+    }
+
     $count = $result->num_rows;
     $result->free();
     return array( 'done' => $count < $limit, 'last_key' => $last, 'rows' => $rows, 'cells' => $cells, 'serialized' => $serialized, 'selected' => $count );
 }
-
 
 function wpcm_build_replacement_pairs( $cfg ) {
     $pairs = array();

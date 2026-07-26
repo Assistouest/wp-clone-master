@@ -29,15 +29,17 @@ class WPCM_Importer {
     public function run_step( $step, $session_id, $file_path = '', $new_url = '', $import_opts_json = '' ) {
         switch ( $step ) {
             case 'analyze':
-                return $this->step_analyze( $file_path );
+                return $this->step_analyze( $file_path, $import_opts_json );
             case 'extract':
                 // Backward compatibility for clients that previously started with
                 // the extract step. New clients use analyze, then bounded extract calls.
                 return '' === $session_id
-                    ? $this->step_analyze( $file_path )
+                    ? $this->step_analyze( $file_path, $import_opts_json )
                     : $this->step_extract( $session_id, $file_path );
             case 'prepare':
                 return $this->step_prepare( $session_id, $new_url, $import_opts_json );
+            case 'store':
+                return $this->step_store( $session_id, $file_path );
             default:
                 throw new Exception( __( 'Unknown import step.', 'clone-master' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
@@ -54,13 +56,16 @@ class WPCM_Importer {
      * @return array
      * @throws Exception On invalid or unsafe archives.
      */
-    private function step_analyze( $file_path ) {
+    private function step_analyze( $file_path, $import_opts_json = '' ) {
         if ( ! is_file( $file_path ) || ! is_readable( $file_path ) ) {
             throw new Exception( __( 'WPCM archive not found or unreadable.', 'clone-master' ) );
         }
         if ( 'wpcm' !== strtolower( pathinfo( $file_path, PATHINFO_EXTENSION ) ) ) {
             throw new Exception( __( 'Only .wpcm backup containers are accepted.', 'clone-master' ) );
         }
+
+        $requested_options = json_decode( $import_opts_json ?: '{}', true );
+        $validate_only     = is_array( $requested_options ) && ! empty( $requested_options['store_only'] );
 
         for ( $attempt = 0; $attempt < 5; $attempt++ ) {
             $session_id  = 'import_' . gmdate( 'Ymd_His' ) . '_' . strtolower( wp_generate_password( 24, false, false ) );
@@ -98,6 +103,7 @@ class WPCM_Importer {
                 'database_size'           => (int) $scan['database_size'],
                 'entry_count'             => (int) $scan['entry_count'],
                 'chunk_count'             => (int) $scan['chunk_count'],
+                'validate_only'           => $validate_only,
                 'created_at'              => gmdate( 'c' ),
             );
             WPCM_Reliability::atomic_signed_json(
@@ -106,7 +112,7 @@ class WPCM_Importer {
                 'import-analysis:' . $session_id
             );
 
-            $state = WPCM_Archive_Reader::initial_state( $scan, $this->initial_extract_slice_bytes() );
+            $state = WPCM_Archive_Reader::initial_state( $scan, $this->initial_extract_slice_bytes(), $validate_only );
             WPCM_Reliability::atomic_signed_json(
                 $session_dir . 'extraction-state.json',
                 $state,
@@ -116,7 +122,7 @@ class WPCM_Importer {
             return array(
                 'session_id'          => $session_id,
                 'next_step'           => 'extract',
-                'phase'               => 'validating',
+                'phase'               => $validate_only ? 'verifying' : 'validating',
                 'progress'            => 1,
                 'archive_size'        => (int) $scan['archive_size'],
                 'payload_length'      => (int) $scan['payload_length'],
@@ -128,7 +134,9 @@ class WPCM_Importer {
                 'next_slice_bytes'    => (int) $state['slice_bytes'],
                 'hash_mode'           => (string) $state['hash_mode'],
                 'message'             => sprintf(
-                    __( 'Structural index complete: %1$s and %2$s entries. Adaptive block validation is starting.', 'clone-master' ),
+                    $validate_only
+                        ? __( 'Structural index complete: %1$s and %2$s entries. Adaptive verification is starting without extracting the site.', 'clone-master' )
+                        : __( 'Structural index complete: %1$s and %2$s entries. Adaptive block validation is starting.', 'clone-master' ),
                     $this->format_exact_bytes( (int) $scan['archive_size'] ),
                     number_format_i18n( (int) $scan['entry_count'], 0 )
                 ),
@@ -241,7 +249,7 @@ class WPCM_Importer {
                 return array(
                     'session_id'         => $session_id,
                     'next_step'          => 'extract',
-                    'phase'              => 'validating',
+                    'phase'              => ! empty( $state['validate_only'] ) ? 'verifying' : 'validating',
                     'progress'           => $percent,
                     'archive_offset'     => $offset,
                     'archive_total'      => $payload_length,
@@ -257,7 +265,9 @@ class WPCM_Importer {
                     'memory_peak'        => (int) $state['last_memory_peak'],
                     'adaptive_reason'    => (string) $state['last_reason'],
                     'message'            => sprintf(
-                        __( 'Validating and extracting: %1$s of %2$s (%3$d%%).', 'clone-master' ),
+                        ! empty( $state['validate_only'] )
+                            ? __( 'Verifying archive blocks: %1$s of %2$s (%3$d%%).', 'clone-master' )
+                            : __( 'Validating and extracting: %1$s of %2$s (%3$d%%).', 'clone-master' ),
                         $this->format_compact_bytes( $offset ),
                         $this->format_compact_bytes( $payload_length ),
                         $percent
@@ -276,25 +286,32 @@ class WPCM_Importer {
             if ( ! is_array( $manifest ) ) {
                 throw new Exception( __( 'The validated WPCM manifest is missing.', 'clone-master' ) );
             }
-            $manifest = $this->normalize_wpcm_manifest( $manifest, $session_dir, true );
+            $validate_only = ! empty( $state['validate_only'] );
+            $manifest      = $this->normalize_wpcm_manifest( $manifest, $session_dir, ! $validate_only );
 
-            $database = trailingslashit( $session_dir ) . 'database.sql';
-            if ( ! is_file( $database ) || ! is_readable( $database ) ) {
-                throw new Exception( __( 'The validated WPCM database stream is missing.', 'clone-master' ) );
-            }
             $database_hash = (string) ( $state['database_hash'] ?? '' );
-            if ( '' === $database_hash ) {
-                $database_hash = (string) hash_file( 'sha256', $database );
+            if ( ! $validate_only ) {
+                $database = trailingslashit( $session_dir ) . 'database.sql';
+                if ( ! is_file( $database ) || ! is_readable( $database ) ) {
+                    throw new Exception( __( 'The validated WPCM database stream is missing.', 'clone-master' ) );
+                }
+                if ( '' === $database_hash ) {
+                    $database_hash = (string) hash_file( 'sha256', $database );
+                }
             }
             if ( ! preg_match( '/^[a-f0-9]{64}$/', $database_hash )
                 || ! hash_equals( (string) $manifest['sha256_database'], $database_hash ) ) {
-                throw new Exception( __( 'The extracted database stream failed SHA-256 validation.', 'clone-master' ) );
+                throw new Exception( $validate_only
+                    ? __( 'The archived database stream failed SHA-256 validation.', 'clone-master' )
+                    : __( 'The extracted database stream failed SHA-256 validation.', 'clone-master' ) );
             }
             if ( (int) $manifest['files_count'] !== (int) $state['files_count']
                 || (int) $manifest['files_size'] !== (int) $state['files_size'] ) {
-                throw new Exception( __( 'The extracted WPCM file inventory no longer matches the manifest.', 'clone-master' ) );
+                throw new Exception( $validate_only
+                    ? __( 'The verified WPCM file inventory no longer matches the manifest.', 'clone-master' )
+                    : __( 'The extracted WPCM file inventory no longer matches the manifest.', 'clone-master' ) );
             }
-            $this->validate_manifest( $manifest, $session_dir, false );
+            $this->validate_manifest( $manifest, $session_dir, false, ! $validate_only );
 
             $manifest_path = $session_dir . 'manifest.json';
             WPCM_Reliability::atomic_json( $manifest_path, $manifest );
@@ -311,7 +328,9 @@ class WPCM_Importer {
                     'normalized_manifest_sha256' => WPCM_Reliability::checksum( $manifest_path ),
                     'format'                     => 'wpcm-append-only',
                     'schema_version'             => '2.0',
-                    'validation_mode'            => 'adaptive-block-sha256-and-footer-sha256',
+                    'validation_mode'            => $validate_only
+                        ? 'adaptive-block-sha256-and-footer-sha256-without-extraction'
+                        : 'adaptive-block-sha256-and-footer-sha256',
                 ),
                 'import-validation:' . $session_id
             );
@@ -347,7 +366,8 @@ class WPCM_Importer {
         if ( false === $root_real ) {
             throw new RuntimeException( __( 'Unable to resolve the protected import workspace.', 'clone-master' ) );
         }
-        $prefix = rtrim( $root_real, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR;
+        $prefix       = rtrim( $root_real, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR;
+        $parent_cache = array();
         foreach ( (array) ( $state['pending_publish'] ?? array() ) as $pending ) {
             if ( ! is_array( $pending ) ) {
                 throw new RuntimeException( __( 'The pending extraction publication state is invalid.', 'clone-master' ) );
@@ -364,14 +384,20 @@ class WPCM_Importer {
             $target  = $prefix . str_replace( '/', DIRECTORY_SEPARATOR, $entry );
             $partial = $target . '.partial';
             $size    = (int) ( $pending['expected_size'] ?? -1 );
-            $target_parent  = realpath( dirname( $target ) );
-            $partial_parent = realpath( dirname( $partial ) );
-            if ( false === $target_parent || false === $partial_parent
-                || 0 !== strpos( rtrim( $target_parent, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR, $prefix )
-                || 0 !== strpos( rtrim( $partial_parent, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR, $prefix ) ) {
-                throw new RuntimeException( __( 'A pending WPCM extraction path escaped its protected root.', 'clone-master' ) );
+            $parent_path = dirname( $target );
+            if ( isset( $parent_cache[ $parent_path ] ) ) {
+                $target_parent = $parent_cache[ $parent_path ];
+            } else {
+                $target_parent = realpath( $parent_path );
+                if ( false === $target_parent
+                    || 0 !== strpos( rtrim( $target_parent, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR, $prefix ) ) {
+                    throw new RuntimeException( __( 'A pending WPCM extraction path escaped its protected root.', 'clone-master' ) );
+                }
+                $parent_cache[ $parent_path ] = $target_parent;
             }
 
+            clearstatcache( true, $target );
+            clearstatcache( true, $partial );
             if ( is_file( $target ) && ! is_link( $target ) ) {
                 if ( (int) @filesize( $target ) !== $size ) {
                     throw new RuntimeException( __( 'A published WPCM extraction file has an unexpected size.', 'clone-master' ) );
@@ -424,23 +450,212 @@ class WPCM_Importer {
                 'files_size'     => (int) $manifest['files_size'],
                 'archive_size'   => (int) $state['archive_size'],
                 'integrity'      => 'verified-wpcm',
+                'validation_only'=> ! empty( $state['validate_only'] ),
             ),
             'next_step' => 'prepare',
             'phase'     => 'validated',
             'progress'  => 100,
             'message'   => sprintf(
-                __( 'WPCM archive fully validated and extracted: %s.', 'clone-master' ),
+                ! empty( $state['validate_only'] )
+                    ? __( 'WPCM archive fully validated without restoring or extracting the site: %s.', 'clone-master' )
+                    : __( 'WPCM archive fully validated and extracted: %s.', 'clone-master' ),
                 $this->format_exact_bytes( (int) $state['archive_size'] )
             ),
         );
+    }
+
+    /**
+     * Publish a fully validated uploaded archive in the local backup library
+     * without restoring its database or files.
+     *
+     * @param string $session_id Validated import session.
+     * @param string $file_path  Original uploaded archive path.
+     * @return array
+     * @throws Exception On validation or publication failure.
+     */
+    private function step_store( $session_id, $file_path ) {
+        if ( ! preg_match( '/^[a-zA-Z0-9_]{1,100}$/', $session_id ) ) {
+            throw new Exception( __( 'Invalid import session.', 'clone-master' ) );
+        }
+        $session_dir = WPCM_TEMP_DIR . $session_id . '/';
+        if ( ! is_dir( $session_dir ) ) {
+            throw new Exception( __( 'Import session not found.', 'clone-master' ) );
+        }
+
+        $lock = WPCM_Reliability::acquire_lock( $session_dir . '.store.lock' );
+        if ( false === $lock ) {
+            throw new Exception( __( 'The validated archive is already being stored.', 'clone-master' ) );
+        }
+
+        $stored       = null;
+        $cleanup_dirs = array();
+        try {
+            $plan = WPCM_Reliability::read_signed_json(
+                $session_dir . 'analysis-plan.json',
+                'import-analysis:' . $session_id
+            );
+            $state = WPCM_Reliability::read_signed_json(
+                $session_dir . 'extraction-state.json',
+                'import-extraction:' . $session_id
+            );
+            $validation = WPCM_Reliability::read_signed_json(
+                $session_dir . 'archive-validation.json',
+                'import-validation:' . $session_id
+            );
+            if ( ! is_array( $plan ) || ! is_array( $state ) || ! is_array( $validation )
+                || 'validated' !== (string) ( $state['phase'] ?? '' ) ) {
+                throw new Exception( __( 'The archive must be fully validated before it can be stored.', 'clone-master' ) );
+            }
+
+            $source = realpath( (string) ( $plan['archive_path'] ?? '' ) );
+            $given  = '' !== $file_path ? realpath( $file_path ) : $source;
+            if ( false === $source || false === $given || $source !== $given
+                || ! is_file( $source ) || ! is_readable( $source ) || is_link( $source ) ) {
+                throw new Exception( __( 'The archive source changed after validation.', 'clone-master' ) );
+            }
+            $archive_size = (int) @filesize( $source );
+            $archive_mtime = (int) @filemtime( $source );
+            $footer_hash   = WPCM_Archive::footer_payload_hash( $source );
+            $expected_payload_hash = strtolower( (string) ( $validation['payload_sha256'] ?? $plan['payload_sha256'] ?? '' ) );
+            $fingerprint = is_string( $footer_hash )
+                ? hash( 'sha256', $source . '|' . $archive_size . '|' . $archive_mtime . '|' . $footer_hash )
+                : '';
+            if ( $archive_size < 1
+                || $archive_size !== (int) ( $validation['archive_bytes'] ?? 0 )
+                || ! is_string( $footer_hash )
+                || ! preg_match( '/^[a-f0-9]{64}$/', $expected_payload_hash )
+                || ! hash_equals( $expected_payload_hash, strtolower( $footer_hash ) )
+                || ! hash_equals( (string) ( $plan['source_fingerprint'] ?? '' ), $fingerprint ) ) {
+                throw new Exception( __( 'The validated archive no longer matches its authenticated record.', 'clone-master' ) );
+            }
+
+            if ( ! is_dir( WPCM_BACKUP_DIR ) && ! wp_mkdir_p( WPCM_BACKUP_DIR ) ) {
+                throw new RuntimeException( __( 'Unable to create the local backup directory.', 'clone-master' ) );
+            }
+            WPCM_Plugin::protect_directory( WPCM_BACKUP_DIR );
+
+            $file_hash   = '';
+            $payload_hash = strtolower( (string) ( $validation['payload_sha256'] ?? '' ) );
+            $backup_root  = realpath( WPCM_BACKUP_DIR );
+            $source_root  = realpath( dirname( $source ) );
+            if ( false !== $backup_root && false !== $source_root
+                && rtrim( $source_root, DIRECTORY_SEPARATOR ) === rtrim( $backup_root, DIRECTORY_SEPARATOR ) ) {
+                $destination = $source;
+                $source_sidecar = $source . '.sha256';
+                if ( is_file( $source_sidecar ) ) {
+                    $candidate_hash = strtolower( trim( (string) @file_get_contents( $source_sidecar ) ) );
+                    if ( preg_match( '/^[a-f0-9]{64}$/', $candidate_hash ) ) {
+                        $file_hash = $candidate_hash;
+                    }
+                }
+            } else {
+                $safe_name   = sanitize_file_name( basename( $source ) );
+                if ( 'wpcm' !== strtolower( pathinfo( $safe_name, PATHINFO_EXTENSION ) ) ) {
+                    $safe_name .= '.wpcm';
+                }
+                $safe_name   = wp_unique_filename( WPCM_BACKUP_DIR, $safe_name );
+                $destination = WPCM_BACKUP_DIR . $safe_name;
+                $partial     = $destination . '.partial-' . strtolower( wp_generate_password( 12, false, false ) );
+
+                if ( ! @rename( $source, $destination ) ) {
+                    $input  = @fopen( $source, 'rb' );
+                    $output = @fopen( $partial, 'xb' );
+                    if ( ! is_resource( $input ) || ! is_resource( $output ) ) {
+                        if ( is_resource( $input ) ) fclose( $input );
+                        if ( is_resource( $output ) ) fclose( $output );
+                        if ( is_file( $partial ) ) wp_delete_file( $partial );
+                        throw new RuntimeException( __( 'Unable to publish the imported archive in the local backup directory.', 'clone-master' ) );
+                    }
+                    try {
+                        $copied      = 0;
+                        $hash_context = hash_init( 'sha256' );
+                        while ( ! feof( $input ) ) {
+                            $chunk = fread( $input, MB_IN_BYTES );
+                            if ( false === $chunk ) {
+                                throw new RuntimeException( __( 'Unable to read the validated archive while storing it.', 'clone-master' ) );
+                            }
+                            if ( '' === $chunk ) {
+                                break;
+                            }
+                            WPCM_Archive::write_exact( $output, $chunk );
+                            hash_update( $hash_context, $chunk );
+                            $copied += strlen( $chunk );
+                        }
+                        WPCM_Archive::flush( $output );
+                        $file_hash = hash_final( $hash_context );
+                    } finally {
+                        fclose( $input );
+                        fclose( $output );
+                    }
+                    clearstatcache( true, $partial );
+                    if ( $copied !== $archive_size || (int) @filesize( $partial ) !== $archive_size
+                        || null === WPCM_Archive::footer_payload_hash( $partial ) ) {
+                        wp_delete_file( $partial );
+                        throw new RuntimeException( __( 'The stored archive failed its final size or footer check.', 'clone-master' ) );
+                    }
+                    if ( ! @rename( $partial, $destination ) ) {
+                        wp_delete_file( $partial );
+                        throw new RuntimeException( __( 'Unable to atomically publish the imported archive.', 'clone-master' ) );
+                    }
+                    wp_delete_file( $source );
+                }
+            }
+
+            clearstatcache( true, $destination );
+            if ( preg_match( '/^[a-f0-9]{64}$/', $file_hash ) ) {
+                WPCM_Reliability::atomic_write( $destination . '.sha256', strtolower( $file_hash ) . "\n", 0640 );
+            }
+
+            $stored = array(
+                'filename'       => basename( $destination ),
+                'path'           => $destination,
+                'size'           => (int) @filesize( $destination ),
+                'sha256'         => preg_match( '/^[a-f0-9]{64}$/', $file_hash ) ? strtolower( $file_hash ) : '',
+                'payload_sha256' => preg_match( '/^[a-f0-9]{64}$/', $payload_hash ) ? $payload_hash : '',
+                'progress'   => 100,
+                'phase'      => 'stored',
+                'next_step'  => null,
+                'message'    => sprintf(
+                    __( 'Archive verified and added to local backups: %s.', 'clone-master' ),
+                    basename( $destination )
+                ),
+            );
+
+            $source_parent = realpath( dirname( $source ) );
+            $temp_root     = realpath( WPCM_TEMP_DIR );
+            if ( false !== $source_parent && false !== $temp_root
+                && 0 === strpos( rtrim( $source_parent, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR, rtrim( $temp_root, DIRECTORY_SEPARATOR ) . DIRECTORY_SEPARATOR ) ) {
+                $cleanup_dirs[] = $source_parent;
+            }
+            WPCM_Debug_Log::write( 'info', 'import_archive_stored', array(
+                'session_id' => $session_id,
+                'filename'   => basename( $destination ),
+                'bytes'      => (int) @filesize( $destination ),
+                'sha256'     => preg_match( '/^[a-f0-9]{64}$/', $file_hash ) ? strtolower( $file_hash ) : '',
+                'payload_sha256' => preg_match( '/^[a-f0-9]{64}$/', $payload_hash ) ? $payload_hash : '',
+            ) );
+        } finally {
+            WPCM_Reliability::release_lock( $lock );
+        }
+
+        if ( is_array( $stored ) ) {
+            $this->recursive_delete( $session_dir );
+            foreach ( array_unique( $cleanup_dirs ) as $directory ) {
+                if ( is_dir( $directory ) && realpath( $directory ) !== realpath( $session_dir ) ) {
+                    $this->recursive_delete( $directory );
+                }
+            }
+            return $stored;
+        }
+        throw new RuntimeException( __( 'The archive could not be stored.', 'clone-master' ) );
     }
 
     /** Return a short wall-clock budget for one analysis request. */
     private function extract_time_budget() {
         $configured = (int) ini_get( 'max_execution_time' );
         $reference  = $configured > 0 ? $configured : 30;
-        $budget     = max( 3.0, min( 7.0, $reference * 0.20 ) );
-        return max( 2.0, min( 12.0, (float) apply_filters( 'wpcm_import_extract_time_budget', $budget, $configured ) ) );
+        $budget     = max( 8.0, min( 20.0, $reference * 0.40 ) );
+        return max( 6.0, min( 24.0, (float) apply_filters( 'wpcm_import_extract_time_budget', $budget, $configured ) ) );
     }
 
     /** Return the effective PHP memory limit in bytes, or zero when unlimited. */
@@ -473,15 +688,17 @@ class WPCM_Importer {
         $limit    = $this->effective_memory_limit();
         $used     = memory_get_usage( true );
         $headroom = $limit > 0 ? max( 0, $limit - $used ) : 512 * MB_IN_BYTES;
-        $slice    = 32 * MB_IN_BYTES;
+        $slice = 64 * MB_IN_BYTES;
         if ( $headroom < 64 * MB_IN_BYTES ) {
             $slice = 8 * MB_IN_BYTES;
         } elseif ( $headroom < 128 * MB_IN_BYTES ) {
             $slice = 16 * MB_IN_BYTES;
+        } elseif ( $headroom < 256 * MB_IN_BYTES ) {
+            $slice = 32 * MB_IN_BYTES;
         } elseif ( $headroom >= 512 * MB_IN_BYTES ) {
-            $slice = 64 * MB_IN_BYTES;
+            $slice = 128 * MB_IN_BYTES;
         }
-        return max( 4 * MB_IN_BYTES, min( 256 * MB_IN_BYTES, (int) apply_filters( 'wpcm_import_initial_slice_bytes', $slice, $limit, $used ) ) );
+        return max( 8 * MB_IN_BYTES, min( 512 * MB_IN_BYTES, (int) apply_filters( 'wpcm_import_initial_slice_bytes', $slice, $limit, $used ) ) );
     }
 
     /** Format an exact, user-facing size including the byte count. */
@@ -732,7 +949,7 @@ __halt_compiler();
         WPCM_Reliability::atomic_write( $session_dir . 'recovery-key.php', $recovery_payload, 0600 );
 
         $initial_state = array(
-            'version'            => 2,
+            'version'            => 3,
             'restore_id'         => $restore_id,
             'phase'              => 'prepared',
             'updated_at'         => gmdate( 'c' ),
@@ -750,10 +967,12 @@ __halt_compiler();
                 'scanned'      => 0,
                 'cells'        => 0,
                 'serialized'   => 0,
+                'candidates'   => 0,
                 'skipped'      => array(),
-                'page_size'    => 100,
+                'strategy_version' => 2,
+                'page_size'    => 1000,
                 'growth_streak'=> 0,
-                'time_budget'         => 4.0,
+                'time_budget'         => 10.0,
                 'worker_growth_streak'=> 0,
                 'last_reason'         => 'learning',
             ),
@@ -858,7 +1077,7 @@ __halt_compiler();
      * @return void
      * @throws Exception On integrity failure.
      */
-    private function validate_manifest( array $manifest, $base_dir, $full_validation = true ) {
+    private function validate_manifest( array $manifest, $base_dir, $full_validation = true, $require_database = true ) {
         foreach ( array( 'schema_version', 'format', 'site_url', 'table_prefix', 'sha256_database', 'files_count', 'files_size', 'tables' ) as $required ) {
             if ( ! array_key_exists( $required, $manifest ) ) {
                 throw new Exception( sprintf( 'Invalid WPCM manifest: field "%s" is missing.', $required ) );
@@ -871,10 +1090,10 @@ __halt_compiler();
             throw new Exception( __( 'Invalid WPCM table prefix.', 'clone-master' ) );
         }
         $database = trailingslashit( $base_dir ) . 'database.sql';
-        if ( ! is_file( $database ) || ! is_readable( $database ) ) {
+        if ( $require_database && ( ! is_file( $database ) || ! is_readable( $database ) ) ) {
             throw new Exception( __( 'The validated WPCM database stream is missing.', 'clone-master' ) );
         }
-        if ( $full_validation ) {
+        if ( $full_validation && $require_database ) {
             $database_hash = hash_file( 'sha256', $database );
             if ( ! is_string( $database_hash ) || ! hash_equals( (string) $manifest['sha256_database'], $database_hash ) ) {
                 throw new Exception( __( 'The extracted database stream failed SHA-256 validation.', 'clone-master' ) );

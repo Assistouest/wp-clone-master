@@ -4,7 +4,7 @@ Tags: backup, migration, clone, restore, nextcloud
 Requires at least: 5.6
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 3.2.3
+Stable tag: 3.2.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -78,6 +78,29 @@ A sliced live backup cannot be one database transaction across multiple HTTP req
 3. Review server diagnostics before the first backup.
 4. On Nginx, optionally apply the fixed backup-directory deny rule shown by the plugin.
 
+== WP-CLI and emergency recovery ==
+
+The Clone Master administration now includes a Recovery tab with copyable commands and the actual backup and recovery-kit paths for the current installation.
+
+Clone Master registers the following WP-CLI commands when WordPress can still bootstrap:
+
+`wp clone-master backup create`
+`wp clone-master backup list`
+`wp clone-master archive info backup.wpcm`
+`wp clone-master archive verify backup.wpcm`
+`wp clone-master archive extract backup.wpcm /path/to/empty-directory`
+`wp clone-master recovery-kit`
+
+The shorter `wp wpcm ...` alias is also available. The archive extraction command validates every block, resumes from a local checkpoint after interruption, and writes `database.sql` plus `wp-content/` into an empty destination.
+
+An autonomous recovery kit is copied to `wp-content/wpcm-backups/recovery-kit/`. It does not load WordPress, plugins, or themes and can therefore be used after a fatal bootstrap failure:
+
+`php wp-content/wpcm-backups/recovery-kit/wpcm-recovery.php info /path/backup.wpcm`
+`php wp-content/wpcm-backups/recovery-kit/wpcm-recovery.php verify /path/backup.wpcm`
+`php wp-content/wpcm-backups/recovery-kit/wpcm-recovery.php extract /path/backup.wpcm /path/to/empty-directory`
+
+The Restore screen also offers a Store only mode. It uploads and fully validates the WPCM container, then adds it to the local backup library without extracting or restoring the archived site.
+
 == Frequently Asked Questions ==
 
 = Are plugin backups compatible with WP Commander? =
@@ -113,6 +136,33 @@ In `wp-content/wpcm-backups/`. Published `.wpcm` backups are preserved during pl
 Clone Master contains no analytics, advertising, telemetry, or tracking. Outbound requests occur only when an administrator explicitly configures Nextcloud, and they target that configured server.
 
 == Changelog ==
+
+= 3.2.7 =
+* Added a Recovery administration tab with copyable WP-CLI, standalone recovery, database import, and file recovery commands using the installation's real paths.
+* Added a Store only import mode that fully verifies an uploaded WPCM archive and publishes it in the local backup library without changing the database or site files.
+* Added validation-only archive workers so Store only does not extract more than 100,000 archived files into temporary storage.
+* Added atomic imported-archive publication, collision-safe filenames, SHA-256 sidecars, and automatic refresh of the Backups screen.
+
+= 3.2.6 =
+* Added native WP-CLI commands to create, list, inspect, fully verify, and safely extract WPCM backups.
+* Added the shorter `wp wpcm` alias for emergency and scripted workflows.
+* Added resumable command-line extraction with durable local checkpoints, adaptive slices, per-block SHA-256 validation, database checksum validation, and atomic file publication.
+* Added an autonomous recovery kit that runs without bootstrapping WordPress, plugins, or themes.
+* Automatically publishes the recovery kit beside local backups after activation and plugin updates.
+* Added exact JSON output support to the standalone inspection, verification, and extraction commands.
+* Documented manual recovery of `database.sql` and `wp-content/` for severe site failures.
+
+= 3.2.5 =
+* Stabilized adaptive archive validation to avoid repeated block-size oscillation during normal cooperative worker yields.
+* Increased restore worker budgets and extraction slices progressively according to real execution time and memory headroom.
+* Removed per-file physical disk synchronization for small staged files while retaining SHA-256 block validation, atomic publication, and strict synchronization for database.sql and large files.
+* Cached validated extraction and publication directories to reduce filesystem metadata work on sites containing 100,000+ files.
+* Grouped resumable InnoDB INSERT statements into bounded transactions with a database-backed atomic checkpoint.
+* Persisted portable schema-validation hashes in the database checkpoint so interrupted imports resume without losing MySQL/MariaDB compatibility metadata.
+* Reduced filesystem journal synchronization from one durable write per SQL statement to one bounded worker checkpoint.
+* Added SQL-side candidate filtering so serialized URL replacement only transfers rows that actually contain a source URL or path.
+* Increased adaptive URL replacement pages from 2,000 to 10,000 matching rows while retaining memory and execution-time safeguards.
+* Grouped staged InnoDB URL updates into page transactions and reduced repetitive adaptive activity-log entries.
 
 = 3.2.3 =
 * Added portable schema validation for equivalent MySQL and MariaDB binary defaults.

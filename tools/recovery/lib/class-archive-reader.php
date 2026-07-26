@@ -204,7 +204,7 @@ final class WPCM_Archive_Reader {
      * @param int   $slice_bytes Initial adaptive byte target.
      * @return array<string,mixed>
      */
-    public static function initial_state( array $scan, $slice_bytes, $validate_only = false ) {
+    public static function initial_state( array $scan, $slice_bytes ) {
         $hash_mode    = PHP_VERSION_ID >= 80000 ? 'native-resumable' : 'final-pass';
         $hash_context = '';
         if ( 'native-resumable' === $hash_mode ) {
@@ -225,7 +225,6 @@ final class WPCM_Archive_Reader {
             'offset'                => strlen( WPCM_Archive::MAGIC ),
             'current'               => null,
             'pending_publish'       => array(),
-            'validate_only'         => (bool) $validate_only,
             'files_count'           => 0,
             'files_size'            => 0,
             'database_found'        => false,
@@ -266,7 +265,6 @@ final class WPCM_Archive_Reader {
         if ( self::STATE_VERSION !== (int) ( $state['version'] ?? 0 ) || 'extracting' !== (string) ( $state['phase'] ?? '' ) ) {
             throw new RuntimeException( 'The WPCM extraction state is invalid.' );
         }
-        $validate_only = ! empty( $state['validate_only'] );
         $size  = @filesize( $path );
         $mtime = @filemtime( $path );
         if ( false === $size || (int) $size !== (int) $state['archive_size'] || ( false !== $mtime && (int) $mtime !== (int) $state['archive_mtime'] ) ) {
@@ -320,16 +318,7 @@ final class WPCM_Archive_Reader {
 
         try {
             if ( is_array( $current ) ) {
-                if ( $validate_only ) {
-                    if ( 'database.sql' === (string) $current['entry'] ) {
-                        $encoded = (string) ( $current['database_hash_context'] ?? '' );
-                        $database_context = '' !== $encoded
-                            ? self::decode_hash_context( $encoded )
-                            : hash_init( 'sha256' );
-                    }
-                } else {
-                    list( $output, $database_context ) = self::resume_current_output( $current, $real_root );
-                }
+                list( $output, $database_context ) = self::resume_current_output( $current, $real_root );
             }
 
             while ( ftell( $handle ) < $payload_length ) {
@@ -340,7 +329,7 @@ final class WPCM_Archive_Reader {
                         if ( $declared_size !== (int) $current['expected_size'] || (int) $current['written'] !== (int) $current['expected_size'] ) {
                             throw new RuntimeException( 'A WPCM file size is inconsistent.' );
                         }
-                        if ( ! $validate_only && is_resource( $output ) ) {
+                        if ( is_resource( $output ) ) {
                             self::flush_extracted_output( $output, (string) $current['entry'], (int) $current['expected_size'] );
                             fclose( $output );
                             $output = null;
@@ -356,15 +345,13 @@ final class WPCM_Archive_Reader {
                         }
                         $state['uncompressed_bytes'] = (int) $state['uncompressed_bytes'] + (int) $current['expected_size'];
                         $state['entry_count']        = (int) $state['entry_count'] + 1;
-                        if ( ! $validate_only ) {
-                            $pending_entry = array(
-                                'entry'         => (string) $current['entry'],
-                                'expected_size' => (int) $current['expected_size'],
-                                'mtime'         => (int) $current['mtime'],
-                            );
-                            $pending[] = $pending_entry;
-                            $pending_state_bytes += strlen( (string) $current['entry'] ) + 96;
-                        }
+                        $pending_entry = array(
+                            'entry'         => (string) $current['entry'],
+                            'expected_size' => (int) $current['expected_size'],
+                            'mtime'         => (int) $current['mtime'],
+                        );
+                        $pending[] = $pending_entry;
+                        $pending_state_bytes += strlen( (string) $current['entry'] ) + 96;
                         $current = null;
                         $state['current'] = null;
                         $state['offset']  = ftell( $handle );
@@ -399,9 +386,7 @@ final class WPCM_Archive_Reader {
                     if ( ! is_string( $raw ) || strlen( $raw ) !== $raw_length || ! hash_equals( $chunk_hash, hash( 'sha256', $raw, true ) ) ) {
                         throw new RuntimeException( 'A WPCM data block failed SHA-256 validation.' );
                     }
-                    if ( ! $validate_only ) {
-                        WPCM_Archive::write_exact( $output, $raw );
-                    }
+                    WPCM_Archive::write_exact( $output, $raw );
                     if ( 'database.sql' === (string) $current['entry'] && 'native-resumable' === (string) $state['hash_mode'] ) {
                         hash_update( $database_context, $raw );
                     }
@@ -442,7 +427,7 @@ final class WPCM_Archive_Reader {
                         $state['payload_sha256'] = $actual_hash;
                         $state['payload_hash_context'] = '';
                     }
-                    $state['phase'] = $validate_only ? 'validated' : 'extracted';
+                    $state['phase'] = 'extracted';
                     break;
                 }
                 if ( 'FILE' !== $tag ) {
@@ -461,20 +446,16 @@ final class WPCM_Archive_Reader {
                     throw new RuntimeException( 'The WPCM container contains multiple database dumps.' );
                 }
 
-                $target  = '';
-                $partial = '';
-                if ( ! $validate_only ) {
-                    list( $target, $partial ) = self::resolve_output_paths( $real_root, $entry );
-                    if ( file_exists( $target ) || is_link( $target ) ) {
-                        throw new RuntimeException( 'A WPCM extraction target already exists: ' . $entry );
-                    }
-                    if ( file_exists( $partial ) || is_link( $partial ) ) {
-                        @unlink( $partial );
-                    }
-                    $output = @fopen( $partial, 'xb' );
-                    if ( ! is_resource( $output ) ) {
-                        throw new RuntimeException( 'Unable to create a WPCM extraction file.' );
-                    }
+                list( $target, $partial ) = self::resolve_output_paths( $real_root, $entry );
+                if ( file_exists( $target ) || is_link( $target ) ) {
+                    throw new RuntimeException( 'A WPCM extraction target already exists: ' . $entry );
+                }
+                if ( file_exists( $partial ) || is_link( $partial ) ) {
+                    @unlink( $partial );
+                }
+                $output = @fopen( $partial, 'xb' );
+                if ( ! is_resource( $output ) ) {
+                    throw new RuntimeException( 'Unable to create a WPCM extraction file.' );
                 }
                 $database_context = null;
                 if ( 'database.sql' === $entry && 'native-resumable' === (string) $state['hash_mode'] ) {
@@ -493,13 +474,13 @@ final class WPCM_Archive_Reader {
                 $state['offset']  = ftell( $handle );
             }
 
-            if ( ! $validate_only && is_resource( $output ) ) {
+            if ( is_resource( $output ) ) {
                 self::flush_extracted_output( $output, is_array( $current ) ? (string) $current['entry'] : '', is_array( $current ) ? (int) $current['expected_size'] : 0 );
                 fclose( $output );
                 $output = null;
             }
 
-            if ( 'native-resumable' === (string) $state['hash_mode'] && ! in_array( (string) $state['phase'], array( 'extracted', 'validated' ), true ) ) {
+            if ( 'native-resumable' === (string) $state['hash_mode'] && 'extracted' !== (string) $state['phase'] ) {
                 $state['payload_hash_context'] = self::encode_hash_context( $payload_context );
                 if ( is_array( $current ) && 'database.sql' === (string) $current['entry'] ) {
                     $current['database_hash_context'] = self::encode_hash_context( $database_context );
@@ -524,7 +505,7 @@ final class WPCM_Archive_Reader {
 
             return array(
                 'state'          => $state,
-                'done'           => in_array( (string) $state['phase'], array( 'extracted', 'validated' ), true ),
+                'done'           => 'extracted' === (string) $state['phase'],
                 'archive_bytes'  => $archive_bytes,
                 'expanded_bytes' => $expanded_bytes,
                 'duration'       => $duration,
