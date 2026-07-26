@@ -610,7 +610,7 @@ class WPCM_Exporter {
             $header .= '-- Site: ' . site_url() . "\n";
             $header .= '-- Prefix: ' . $prefix . "\n";
             $header .= '-- MySQL: ' . $wpdb->db_version() . "\n";
-            $header .= "SET SQL_MODE = \"NO_AUTO_VALUE_ON_ZERO\";\n";
+            $header .= "SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n";
             $header .= "SET NAMES utf8mb4;\n";
             $header .= "SET FOREIGN_KEY_CHECKS = 0;\n\n";
             WPCM_Reliability::atomic_write( $sql_dir . '0000_header.sql', $header );
@@ -631,6 +631,7 @@ class WPCM_Exporter {
                 'current_count'  => 0,
                 'rows_exported'  => 0,
                 'schema_hash'    => '',
+                'schema_portable_hash' => '',
                 'chunk_index'    => 0,
                 'rows_per_call'  => self::WPCM_DB_ROWS_INITIAL,
                 't_prev'         => 0.0,
@@ -701,8 +702,9 @@ class WPCM_Exporter {
             if ( ! is_array( $create ) || empty( $create[1] ) ) {
                 throw new Exception( sprintf( __( 'Unable to read the schema for table %s.', 'clone-master' ), $table ) );
             }
-            $schema_hash = hash( 'sha256', $this->normalize_create_table( (string) $create[1] ) );
-            $schema_sql  = 'DROP TABLE IF EXISTS ' . $identifier . ";\n" . $create[1] . ";\n";
+            $schema_hash          = hash( 'sha256', $this->normalize_create_table( (string) $create[1] ) );
+            $schema_portable_hash = hash( 'sha256', $this->normalize_create_table_portable( (string) $create[1] ) );
+            $schema_sql           = 'DROP TABLE IF EXISTS ' . $identifier . ";\n" . $create[1] . ";\n";
             WPCM_Reliability::atomic_write( $sql_dir . $file_stub . '_000000_schema.sql', $schema_sql );
 
             $count         = (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . $identifier ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.PreparedSQL.NotPrepared -- Identifier comes from information_schema and is quoted.
@@ -772,8 +774,9 @@ class WPCM_Exporter {
             $cursor['current_count'] = $count;
             $cursor['rows_exported'] = 0;
             $cursor['end_key']       = $end_key;
-            $cursor['schema_hash']   = $schema_hash;
-            $cursor['key_columns']   = $key_columns;
+            $cursor['schema_hash']          = $schema_hash;
+            $cursor['schema_portable_hash'] = $schema_portable_hash;
+            $cursor['key_columns']           = $key_columns;
             $cursor['key_index']     = $key_index;
             $cursor['export_mode']   = $export_mode;
             $cursor['snapshot_table'] = $snapshot_table;
@@ -892,9 +895,15 @@ class WPCM_Exporter {
         $snapshot_to_drop = '';
 
         if ( $complete ) {
-            $create_after = $wpdb->get_row( 'SHOW CREATE TABLE ' . $identifier, ARRAY_N ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.PreparedSQL.NotPrepared -- Identifier comes from information_schema and is quoted.
-            $after_hash   = is_array( $create_after ) && ! empty( $create_after[1] ) ? hash( 'sha256', $this->normalize_create_table( (string) $create_after[1] ) ) : '';
-            if ( empty( $cursor['schema_hash'] ) || ! hash_equals( (string) $cursor['schema_hash'], $after_hash ) ) {
+            $create_after        = $wpdb->get_row( 'SHOW CREATE TABLE ' . $identifier, ARRAY_N ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.PreparedSQL.NotPrepared -- Identifier comes from information_schema and is quoted.
+            $after_hash          = is_array( $create_after ) && ! empty( $create_after[1] ) ? hash( 'sha256', $this->normalize_create_table( (string) $create_after[1] ) ) : '';
+            $after_portable_hash = is_array( $create_after ) && ! empty( $create_after[1] ) ? hash( 'sha256', $this->normalize_create_table_portable( (string) $create_after[1] ) ) : '';
+            if (
+                empty( $cursor['schema_hash'] )
+                || ! hash_equals( (string) $cursor['schema_hash'], $after_hash )
+                || empty( $cursor['schema_portable_hash'] )
+                || ! hash_equals( (string) $cursor['schema_portable_hash'], $after_portable_hash )
+            ) {
                 throw new Exception( sprintf( __( 'The schema of table %s changed during export. Retry the backup when database schema changes have finished.', 'clone-master' ), $table ) );
             }
 
@@ -936,8 +945,9 @@ class WPCM_Exporter {
                 'key_index'    => 'snapshot' === $export_mode ? 'WPCM_SYNTHETIC_SNAPSHOT' : $key_index,
                 'key_columns'  => 'snapshot' === $export_mode ? array() : $key_columns,
                 'key_column'   => 'snapshot' !== $export_mode && 1 === count( $key_columns ) ? $key_columns[0] : '',
-                'schema_hash'  => $after_hash,
-                'chunks'       => $chunk_index,
+                'schema_hash'          => $after_hash,
+                'schema_portable_hash' => $after_portable_hash,
+                'chunks'               => $chunk_index,
             );
             WPCM_Reliability::atomic_signed_json( $info_file, $table_info, $context . ':info' );
 
@@ -955,8 +965,9 @@ class WPCM_Exporter {
             $cursor['current_count'] = 0;
             $cursor['rows_exported'] = 0;
             $cursor['end_key']       = null;
-            $cursor['schema_hash']   = '';
-            $cursor['export_mode']   = '';
+            $cursor['schema_hash']          = '';
+            $cursor['schema_portable_hash'] = '';
+            $cursor['export_mode']           = '';
             $cursor['snapshot_table'] = '';
             $cursor['snapshot_row_id']= '';
             $cursor['source_columns'] = array();
@@ -1593,6 +1604,93 @@ class WPCM_Exporter {
      */
     private function normalize_create_table( $create_sql ) {
         return preg_replace( '/\s+AUTO_INCREMENT=\d+/i', '', trim( (string) $create_sql ) );
+    }
+
+    /**
+     * Normalize binary defaults to a portable hexadecimal representation.
+     *
+     * MySQL and MariaDB may render the same BINARY default either as escaped
+     * zero bytes (for example '\0\0') or as a hexadecimal literal (x'0000').
+     * The portable hash keeps the strict schema hash while allowing these
+     * equivalent server representations to compare safely.
+     *
+     * @param string $create_sql SHOW CREATE TABLE output.
+     * @return string
+     */
+    private function normalize_create_table_portable( $create_sql ) {
+        $normalized = $this->normalize_create_table( $create_sql );
+
+        return preg_replace_callback(
+            '/(^\s*`(?:``|[^`])+`\s+(?:var)?binary\s*\(\s*\d+\s*\)[^\r\n]*?\bDEFAULT\s+)(?:_binary\s+)?(?:(?:x|X)\'([0-9a-fA-F]*)\'|0x([0-9a-fA-F]+)|\'((?:\'\'|\\\\.|[^\'])*)\')/im',
+            function ( $matches ) {
+                $hex = '';
+                if ( isset( $matches[2] ) && '' !== (string) $matches[2] ) {
+                    $hex = strtolower( (string) $matches[2] );
+                } elseif ( isset( $matches[3] ) && '' !== (string) $matches[3] ) {
+                    $hex = strtolower( (string) $matches[3] );
+                } else {
+                    $safe  = false;
+                    $bytes = $this->decode_mysql_string_literal_for_hash( (string) ( $matches[4] ?? '' ), $safe );
+                    if ( ! $safe ) {
+                        return $matches[0];
+                    }
+                    $hex = bin2hex( $bytes );
+                }
+
+                return $matches[1] . "x'" . $hex . "'";
+            },
+            $normalized
+        );
+    }
+
+    /**
+     * Decode the portable subset of MySQL string escapes used by SHOW CREATE.
+     *
+     * @param string $literal Escaped literal body without quote delimiters.
+     * @param bool   $safe    Set to true only when every escape was understood.
+     * @return string Decoded bytes.
+     */
+    private function decode_mysql_string_literal_for_hash( $literal, &$safe ) {
+        $safe    = true;
+        $output  = '';
+        $length  = strlen( $literal );
+        $escapes = array(
+            '0'  => "\0",
+            'b'  => "\x08",
+            'n'  => "\n",
+            'r'  => "\r",
+            't'  => "\t",
+            'Z'  => "\x1a",
+            '\\' => '\\',
+            "'"  => "'",
+            '"'  => '"',
+        );
+
+        for ( $index = 0; $index < $length; $index++ ) {
+            $char = $literal[ $index ];
+            if ( "'" === $char && $index + 1 < $length && "'" === $literal[ $index + 1 ] ) {
+                $output .= "'";
+                $index++;
+                continue;
+            }
+            if ( '\\' !== $char ) {
+                $output .= $char;
+                continue;
+            }
+            if ( $index + 1 >= $length ) {
+                $safe = false;
+                return '';
+            }
+
+            $escaped = $literal[ ++$index ];
+            if ( ! array_key_exists( $escaped, $escapes ) ) {
+                $safe = false;
+                return '';
+            }
+            $output .= $escapes[ $escaped ];
+        }
+
+        return $output;
     }
 
     /**

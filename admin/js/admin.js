@@ -1990,7 +1990,7 @@
                 h('div', { className: 'wpcm-header-text' },
                     h('div', { className: 'wpcm-title-row' },
                         h('h1', null, 'Clone Master'),
-                        h('span', { className: 'wpcm-version-badge' }, 'v' + (wpcmData.version || '3.2.2'))
+                        h('span', { className: 'wpcm-version-badge' }, 'v' + (wpcmData.version || '3.2.3'))
                     ),
                     h('p', null, __( 'Reliable WPCM backups, staged restore and production diagnostics', 'clone-master' ))
                 ),

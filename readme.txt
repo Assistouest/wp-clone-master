@@ -4,7 +4,7 @@ Tags: backup, migration, clone, restore, nextcloud
 Requires at least: 5.6
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 3.2.2
+Stable tag: 3.2.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -113,6 +113,13 @@ In `wp-content/wpcm-backups/`. Published `.wpcm` backups are preserved during pl
 Clone Master contains no analytics, advertising, telemetry, or tracking. Outbound requests occur only when an administrator explicitly configures Nextcloud, and they target that configured server.
 
 == Changelog ==
+
+= 3.2.3 =
+* Added portable schema validation for equivalent MySQL and MariaDB binary defaults.
+* Fixed false schema checksum failures when BINARY defaults are rendered as escaped bytes on the source and hexadecimal literals on the destination.
+* Added a second portable schema hash while retaining the strict schema hash for byte-level drift detection.
+* Validates each archived CREATE TABLE statement before staging and records a resumable portable schema baseline.
+* Uses a single-quoted SQL_MODE export header for compatibility with servers configured with ANSI_QUOTES.
 
 = 3.2.2 =
 * Added a fast structural WPCM index followed by adaptive, resumable block validation and extraction.

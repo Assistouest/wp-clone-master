@@ -3,7 +3,7 @@
  * Plugin Name: Clone Master
  * Plugin URI: https://github.com/Assistouest/clone-master
  * Description: Create resumable WordPress backups and perform staged migrations with strict validation and transactional rollback.
- * Version: 3.2.2
+ * Version: 3.2.3
  * Author: Adrien Piron
  * Author URI: https://profiles.wordpress.org/adrienpiron/
  * License: GPL v2 or later
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 if ( ! defined( 'WPCM_VERSION' ) ) {
-    define( 'WPCM_VERSION', '3.2.2' );
+    define( 'WPCM_VERSION', '3.2.3' );
 }
 if ( ! defined( 'WPCM_PLUGIN_DIR' ) ) {
     define( 'WPCM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );

@@ -592,6 +592,17 @@ function wpcm_step_database( $cfg, &$state, $token ) {
         throw new RuntimeException( 'database.sql is missing from the validated WPCM container.' );
     }
 
+    $expected = is_array( $cfg['expected_tables'] ?? null ) ? array_values( $cfg['expected_tables'] ) : array();
+    if ( empty( $expected ) ) {
+        throw new RuntimeException( 'The archive does not contain a verifiable database table manifest.' );
+    }
+    $expected_by_name = array();
+    foreach ( $expected as $expected_meta ) {
+        if ( is_array( $expected_meta ) && ! empty( $expected_meta['name'] ) ) {
+            $expected_by_name[ (string) $expected_meta['name'] ] = $expected_meta;
+        }
+    }
+
     $mysqli = wpcm_db_connect( $cfg );
     if ( 'prepared' === ( $state['phase'] ?? '' ) ) {
         foreach ( wpcm_tables_with_prefix( $mysqli, $cfg['staging_prefix'] ) as $stale ) {
@@ -608,6 +619,7 @@ function wpcm_step_database( $cfg, &$state, $token ) {
             'queries'         => 0,
             'errors'          => 0,
             'validation_index'=> 0,
+            'schema_portable_hashes' => array(),
             'worker'          => array(
                 'time_budget'   => wpcm_initial_worker_budget(),
                 'growth_streak' => 0,
@@ -693,7 +705,35 @@ function wpcm_step_database( $cfg, &$state, $token ) {
                         $buffer    = '';
                         $offset    = $line_start + $i + 1;
                         if ( '' !== $statement ) {
-                            $statement = wpcm_rewrite_statement_for_staging( $statement, $cfg );
+                            $source_statement = $statement;
+                            $source_table     = wpcm_extract_create_table_name( $source_statement );
+                            if ( '' !== $source_table ) {
+                                if ( ! isset( $expected_by_name[ $source_table ] ) ) {
+                                    fclose( $fh );
+                                    $mysqli->close();
+                                    throw new RuntimeException( 'The SQL stream contains an unexpected table schema: ' . $source_table );
+                                }
+
+                                $expected_meta = $expected_by_name[ $source_table ];
+                                $expected_hash = (string) ( $expected_meta['schema_hash'] ?? '' );
+                                $source_sql    = wpcm_normalize_archived_create_table_for_hash( $source_statement );
+                                $source_hash   = hash( 'sha256', $source_sql );
+                                if ( '' !== $expected_hash && ! hash_equals( $expected_hash, $source_hash ) ) {
+                                    fclose( $fh );
+                                    $mysqli->close();
+                                    throw new RuntimeException( 'Archived schema checksum mismatch before staging table ' . $source_table . '.' );
+                                }
+
+                                if ( ! isset( $state['db']['schema_portable_hashes'] ) || ! is_array( $state['db']['schema_portable_hashes'] ) ) {
+                                    $state['db']['schema_portable_hashes'] = array();
+                                }
+                                $state['db']['schema_portable_hashes'][ $source_table ] = hash(
+                                    'sha256',
+                                    wpcm_normalize_create_table_portable_for_hash( $source_sql )
+                                );
+                            }
+
+                            $statement = wpcm_rewrite_statement_for_staging( $source_statement, $cfg );
                             if ( '' !== $statement && ! $mysqli->query( $statement ) ) {
                                 $error = $mysqli->error;
                                 $errno = $mysqli->errno;
@@ -760,12 +800,6 @@ function wpcm_step_database( $cfg, &$state, $token ) {
         $started = microtime( true );
     }
 
-    $expected = is_array( $cfg['expected_tables'] ?? null ) ? array_values( $cfg['expected_tables'] ) : array();
-    if ( empty( $expected ) ) {
-        $mysqli->close();
-        throw new RuntimeException( 'The archive does not contain a verifiable database table manifest.' );
-    }
-
     $actual_tables = wpcm_tables_with_prefix( $mysqli, $cfg['staging_prefix'] );
     $expected_stage_names = array();
     foreach ( $expected as $meta ) {
@@ -821,36 +855,31 @@ function wpcm_step_database( $cfg, &$state, $token ) {
         $create_result->free();
         $raw_create_sql = (string) ( $create_row[1] ?? '' );
 
-        // First retain the legacy 3.1.2 comparison for existing archives.
+        // Retain the strict comparison first. It detects any byte-level schema
+        // change when the source and destination servers render SHOW CREATE in
+        // the same way.
         $legacy_create_sql = preg_replace( '/^CREATE TABLE `' . preg_quote( $stage_name, '/' ) . '`/i', 'CREATE TABLE `' . $source_name . '`', $raw_create_sql );
         $legacy_create_sql = preg_replace( '/\s+AUTO_INCREMENT=\d+/i', '', trim( (string) $legacy_create_sql ) );
         $legacy_hash       = hash( 'sha256', $legacy_create_sql );
         $expected_hash     = (string) ( $meta['schema_hash'] ?? '' );
         $schema_matches    = '' === $expected_hash || hash_equals( $expected_hash, $legacy_hash );
 
-        // MariaDB preserves staging prefixes in SHOW CREATE TABLE for referenced
-        // tables and prefixed constraint symbols. Canonicalize those identifiers
-        // back to the archived prefix before deciding that the schema differs.
+        // MariaDB can preserve staging prefixes in referenced table names and
+        // constraint symbols. Normalize those identifiers before considering
+        // portable server representations.
+        $canonical_sql  = '';
         $canonical_hash = '';
+        $portable_hash  = '';
+        $expected_portable_hash = (string) ( $meta['schema_portable_hash'] ?? '' );
+        if ( '' === $expected_portable_hash && isset( $state['db']['schema_portable_hashes'][ $source_name ] ) ) {
+            $expected_portable_hash = (string) $state['db']['schema_portable_hashes'][ $source_name ];
+        }
+
         if ( ! $schema_matches ) {
             $canonical_sql  = wpcm_normalize_staged_create_table_for_hash( $raw_create_sql, $cfg );
             $canonical_hash = hash( 'sha256', $canonical_sql );
             $schema_matches = hash_equals( $expected_hash, $canonical_hash );
-            if ( $schema_matches && (int) ( $cfg['staging_rewrite_version'] ?? 1 ) < 2 ) {
-                wpcm_debug_log(
-                    $cfg,
-                    'error',
-                    'installer_legacy_staging_restart_required',
-                    array(
-                        'table'          => $source_name,
-                        'expected_hash'  => $expected_hash,
-                        'legacy_hash'    => $legacy_hash,
-                        'canonical_hash' => $canonical_hash,
-                    )
-                );
-                $mysqli->close();
-                throw new RuntimeException( 'This restore session was staged by an older SQL identifier rewriter. Start over with the updated plugin so the database can be staged safely.' );
-            }
+
             if ( $schema_matches ) {
                 wpcm_debug_log(
                     $cfg,
@@ -866,16 +895,79 @@ function wpcm_step_database( $cfg, &$state, $token ) {
             }
         }
 
-        if ( ! $schema_matches ) {
+        // MySQL and MariaDB may serialize the same BINARY default differently.
+        // A common example is sixteen escaped zero bytes versus x'0000...'.
+        // Compare a second, narrowly portable hash that normalizes only those
+        // equivalent binary-literal representations.
+        if ( ! $schema_matches && '' !== $expected_portable_hash ) {
+            if ( '' === $canonical_sql ) {
+                $canonical_sql = wpcm_normalize_staged_create_table_for_hash( $raw_create_sql, $cfg );
+            }
+            $portable_hash = hash( 'sha256', wpcm_normalize_create_table_portable_for_hash( $canonical_sql ) );
+            $schema_matches = hash_equals( $expected_portable_hash, $portable_hash );
+
+            if ( $schema_matches ) {
+                wpcm_debug_log(
+                    $cfg,
+                    'warning',
+                    'installer_schema_binary_default_normalized',
+                    array(
+                        'table'                  => $source_name,
+                        'expected_hash'          => $expected_hash,
+                        'legacy_hash'            => $legacy_hash,
+                        'canonical_hash'         => $canonical_hash,
+                        'expected_portable_hash' => $expected_portable_hash,
+                        'portable_hash'          => $portable_hash,
+                    )
+                );
+            }
+        }
+
+        if ( $schema_matches && (int) ( $cfg['staging_rewrite_version'] ?? 1 ) < 2 ) {
             wpcm_debug_log(
                 $cfg,
                 'error',
-                'installer_schema_hash_mismatch',
+                'installer_legacy_staging_restart_required',
                 array(
                     'table'          => $source_name,
                     'expected_hash'  => $expected_hash,
                     'legacy_hash'    => $legacy_hash,
                     'canonical_hash' => $canonical_hash,
+                    'portable_hash'  => $portable_hash,
+                )
+            );
+            $mysqli->close();
+            throw new RuntimeException( 'This restore session was staged by an older SQL identifier rewriter. Start over with the updated plugin so the database can be staged safely.' );
+        }
+
+        if ( ! $schema_matches ) {
+            if ( '' === $expected_portable_hash ) {
+                wpcm_debug_log(
+                    $cfg,
+                    'error',
+                    'installer_schema_portable_hash_missing',
+                    array(
+                        'table'          => $source_name,
+                        'expected_hash'  => $expected_hash,
+                        'legacy_hash'    => $legacy_hash,
+                        'canonical_hash' => $canonical_hash,
+                    )
+                );
+                $mysqli->close();
+                throw new RuntimeException( 'This restore session started before portable schema validation was available. Restart the restore with the updated plugin so the database can be staged and verified safely.' );
+            }
+
+            wpcm_debug_log(
+                $cfg,
+                'error',
+                'installer_schema_hash_mismatch',
+                array(
+                    'table'                  => $source_name,
+                    'expected_hash'          => $expected_hash,
+                    'legacy_hash'            => $legacy_hash,
+                    'canonical_hash'         => $canonical_hash,
+                    'expected_portable_hash' => $expected_portable_hash,
+                    'portable_hash'          => $portable_hash,
                 )
             );
             $mysqli->close();
@@ -1118,6 +1210,91 @@ function wpcm_rewrite_quoted_identifiers_for_staging( $statement, $old_prefix, $
         throw new RuntimeException( 'Unterminated quoted string in restore SQL.' );
     }
     return $output;
+}
+
+function wpcm_extract_create_table_name( $statement ) {
+    if ( preg_match( '/^\s*CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+`((?:``|[^`])+)`/i', (string) $statement, $matches ) ) {
+        return str_replace( '``', '`', (string) $matches[1] );
+    }
+    return '';
+}
+
+function wpcm_normalize_archived_create_table_for_hash( $create_sql ) {
+    $normalized = preg_replace(
+        '/^\s*CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS/i',
+        'CREATE TABLE',
+        trim( (string) $create_sql )
+    );
+    $normalized = preg_replace( '/\s+AUTO_INCREMENT=\d+/i', '', (string) $normalized );
+
+    return rtrim( trim( (string) $normalized ), ";\r\n\t " );
+}
+
+function wpcm_decode_mysql_string_literal_for_hash( $literal, &$safe ) {
+    $safe    = true;
+    $output  = '';
+    $length  = strlen( $literal );
+    $escapes = array(
+        '0'  => "\0",
+        'b'  => "\x08",
+        'n'  => "\n",
+        'r'  => "\r",
+        't'  => "\t",
+        'Z'  => "\x1a",
+        '\\' => '\\',
+        "'"  => "'",
+        '"'  => '"',
+    );
+
+    for ( $index = 0; $index < $length; $index++ ) {
+        $char = $literal[ $index ];
+        if ( "'" === $char && $index + 1 < $length && "'" === $literal[ $index + 1 ] ) {
+            $output .= "'";
+            $index++;
+            continue;
+        }
+        if ( '\\' !== $char ) {
+            $output .= $char;
+            continue;
+        }
+        if ( $index + 1 >= $length ) {
+            $safe = false;
+            return '';
+        }
+
+        $escaped = $literal[ ++$index ];
+        if ( ! array_key_exists( $escaped, $escapes ) ) {
+            $safe = false;
+            return '';
+        }
+        $output .= $escapes[ $escaped ];
+    }
+
+    return $output;
+}
+
+function wpcm_normalize_create_table_portable_for_hash( $create_sql ) {
+    return preg_replace_callback(
+        '/(^\s*`(?:``|[^`])+`\s+(?:var)?binary\s*\(\s*\d+\s*\)[^\r\n]*?\bDEFAULT\s+)(?:_binary\s+)?(?:(?:x|X)\'([0-9a-fA-F]*)\'|0x([0-9a-fA-F]+)|\'((?:\'\'|\\\\.|[^\'])*)\')/im',
+        function ( $matches ) {
+            $hex = '';
+            if ( isset( $matches[2] ) && '' !== (string) $matches[2] ) {
+                $hex = strtolower( (string) $matches[2] );
+            } elseif ( isset( $matches[3] ) && '' !== (string) $matches[3] ) {
+                $hex = strtolower( (string) $matches[3] );
+            } else {
+                $safe  = false;
+                $bytes = wpcm_decode_mysql_string_literal_for_hash( (string) ( $matches[4] ?? '' ), $safe );
+                if ( ! $safe ) {
+                    return $matches[0];
+                }
+                $hex = bin2hex( $bytes );
+            }
+
+            return $matches[1] . "x'" . $hex . "'";
+        },
+        wpcm_normalize_archived_create_table_for_hash( $create_sql )
+    );
 }
 
 function wpcm_normalize_staged_create_table_for_hash( $create_sql, $cfg ) {

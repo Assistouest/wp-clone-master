@@ -5,7 +5,7 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: Clone Master 3.2.2\n"
+"Project-Id-Version: Clone Master 3.2.3\n"
 "Report-Msgid-Bugs-To: https://github.com/Assistouest/clone-master/issues\n"
 "POT-Creation-Date: 2026-07-26 00:30+0000\n"
 "PO-Revision-Date: 2026-07-26 00:20+0000\n"

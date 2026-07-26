@@ -1005,8 +1005,9 @@ __halt_compiler();
                     $normalized = preg_replace( '/\s+AUTO_INCREMENT=\d+/i', '', $normalized );
                     $normalized = rtrim( trim( (string) $normalized ), ";\r\n\t " );
                     $tables[] = array(
-                        'name'        => $name,
-                        'schema_hash' => hash( 'sha256', $normalized ),
+                        'name'                 => $name,
+                        'schema_hash'          => hash( 'sha256', $normalized ),
+                        'schema_portable_hash' => hash( 'sha256', $this->normalize_create_table_portable( $normalized ) ),
                     );
                     $buffer = '';
                     $collecting = false;
@@ -1019,6 +1020,86 @@ __halt_compiler();
             throw new Exception( __( 'Unable to derive a complete table manifest from database.sql.', 'clone-master' ) );
         }
         return $tables;
+    }
+
+    /**
+     * Normalize equivalent BINARY default renderings for portable schema checks.
+     *
+     * @param string $create_sql CREATE TABLE statement.
+     * @return string
+     */
+    private function normalize_create_table_portable( $create_sql ) {
+        return preg_replace_callback(
+            '/(^\s*`(?:``|[^`])+`\s+(?:var)?binary\s*\(\s*\d+\s*\)[^\r\n]*?\bDEFAULT\s+)(?:_binary\s+)?(?:(?:x|X)\'([0-9a-fA-F]*)\'|0x([0-9a-fA-F]+)|\'((?:\'\'|\\\\.|[^\'])*)\')/im',
+            function ( $matches ) {
+                $hex = '';
+                if ( isset( $matches[2] ) && '' !== (string) $matches[2] ) {
+                    $hex = strtolower( (string) $matches[2] );
+                } elseif ( isset( $matches[3] ) && '' !== (string) $matches[3] ) {
+                    $hex = strtolower( (string) $matches[3] );
+                } else {
+                    $safe  = false;
+                    $bytes = $this->decode_mysql_string_literal_for_hash( (string) ( $matches[4] ?? '' ), $safe );
+                    if ( ! $safe ) {
+                        return $matches[0];
+                    }
+                    $hex = bin2hex( $bytes );
+                }
+
+                return $matches[1] . "x'" . $hex . "'";
+            },
+            $create_sql
+        );
+    }
+
+    /**
+     * Decode the portable subset of MySQL string escapes emitted by SHOW CREATE.
+     *
+     * @param string $literal Escaped literal body.
+     * @param bool   $safe    Whether every escape was understood.
+     * @return string
+     */
+    private function decode_mysql_string_literal_for_hash( $literal, &$safe ) {
+        $safe    = true;
+        $output  = '';
+        $length  = strlen( $literal );
+        $escapes = array(
+            '0'  => "\0",
+            'b'  => "\x08",
+            'n'  => "\n",
+            'r'  => "\r",
+            't'  => "\t",
+            'Z'  => "\x1a",
+            '\\' => '\\',
+            "'"  => "'",
+            '"'  => '"',
+        );
+
+        for ( $index = 0; $index < $length; $index++ ) {
+            $char = $literal[ $index ];
+            if ( "'" === $char && $index + 1 < $length && "'" === $literal[ $index + 1 ] ) {
+                $output .= "'";
+                $index++;
+                continue;
+            }
+            if ( '\\' !== $char ) {
+                $output .= $char;
+                continue;
+            }
+            if ( $index + 1 >= $length ) {
+                $safe = false;
+                return '';
+            }
+
+            $escaped = $literal[ ++$index ];
+            if ( ! array_key_exists( $escaped, $escapes ) ) {
+                $safe = false;
+                return '';
+            }
+            $output .= $escapes[ $escaped ];
+        }
+
+        return $output;
     }
 
     /**
