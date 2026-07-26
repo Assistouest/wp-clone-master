@@ -294,7 +294,7 @@ La réussite d'une sauvegarde ne remplace pas un test de récupération. Vérifi
 
 Les opérations produisent des diagnostics persistants avec un identifiant de requête. En cas d'échec, conservez cet identifiant et exportez le journal depuis l'écran **Diagnostics** avant de nettoyer la session.
 
-Pour signaler un problème, utilisez les [issues GitHub](https://github.com/Assistouest/clone-master/issues) en indiquant la version de Clone Master, WordPress, PHP, le serveur web, le moteur de base de données et l'étape concernée.
+Pour signaler un problème, utilisez les [issues GitHub](https://github.com/Assistouest/wp-clone-master/issues) en indiquant la version de Clone Master, WordPress, PHP, le serveur web, le moteur de base de données et l'étape concernée.
 
 Ne joignez jamais à une issue publique une archive `.wpcm`, un fichier `wp-config.php`, un mot de passe, un jeton Nextcloud, des cookies d'administration ou des données personnelles.
 
