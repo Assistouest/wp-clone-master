@@ -3,7 +3,7 @@
  * Plugin Name: Clone Master
  * Plugin URI: https://github.com/Assistouest/clone-master
  * Description: Create resumable WordPress backups and perform staged migrations with strict validation and transactional rollback.
- * Version: 3.1.6
+ * Version: 3.2.2
  * Author: Adrien Piron
  * Author URI: https://profiles.wordpress.org/adrienpiron/
  * License: GPL v2 or later
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 if ( ! defined( 'WPCM_VERSION' ) ) {
-    define( 'WPCM_VERSION', '3.1.6' );
+    define( 'WPCM_VERSION', '3.2.2' );
 }
 if ( ! defined( 'WPCM_PLUGIN_DIR' ) ) {
     define( 'WPCM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
@@ -43,6 +43,12 @@ if ( ! defined( 'WPCM_TEMP_DIR' ) ) {
 }
 if ( ! defined( 'WPCM_LOG_DIR' ) ) {
     define( 'WPCM_LOG_DIR', WPCM_STORAGE_ROOT . 'wpcm-logs/' );
+}
+if ( ! defined( 'WPCM_DOWNLOAD_DIR' ) ) {
+    define( 'WPCM_DOWNLOAD_DIR', WPCM_STORAGE_ROOT . 'wpcm-downloads/' );
+}
+if ( ! defined( 'WPCM_DOWNLOAD_URL' ) ) {
+    define( 'WPCM_DOWNLOAD_URL', trailingslashit( content_url( 'wpcm-downloads' ) ) );
 }
 
 // Autoload classes
@@ -82,6 +88,7 @@ class WPCM_Plugin {
         register_deactivation_hook( __FILE__, [ $this, 'deactivate' ] );
 
         add_action( 'init', [ $this, 'protect_private_ajax_responses' ], 0 );
+        add_action( 'init', [ $this, 'cleanup_expired_download_links' ], 1 );
         add_action( 'init', [ $this, 'init' ] );
         add_action( 'admin_menu', [ $this, 'admin_menu' ] );
         add_action( 'admin_notices', [ $this, 'render_activation_warning' ] );
@@ -154,6 +161,7 @@ class WPCM_Plugin {
             }
             self::protect_directory( $dir );
         }
+        $this->prepare_download_directory();
         update_option( 'wpcm_version', WPCM_VERSION );
 
         // Initialise default schedule settings if not present
@@ -376,7 +384,9 @@ class WPCM_Plugin {
             'siteUrl'    => site_url(),
             'homeUrl'    => home_url(),
             'pluginUrl'  => WPCM_PLUGIN_URL,
-            'maxUpload'  => wp_max_upload_size(),
+            'maxUpload'          => wp_max_upload_size(),
+            'uploadChunkMax'     => $this->stream_upload_chunk_limit(),
+            'uploadChunkInitial' => $this->stream_upload_initial_chunk(),
             // Passed to the schedule tab so it can disable Nextcloud when OpenSSL is absent
             // and warn the user that backup directories may be publicly reachable on Nginx.
             'hasOpenssl' => extension_loaded( 'openssl' ),
@@ -456,9 +466,12 @@ class WPCM_Plugin {
         header( 'CDN-Cache-Control: no-store', true );
         header( 'Surrogate-Control: no-store', true );
 
-        // Increase limits
-        @set_time_limit( 300 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required to prevent timeout during large exports/imports
-        @ini_set( 'memory_limit', '512M' ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required for large site processing
+        // Raise resources only for this authenticated export request. WordPress
+        // never lowers an existing host limit when wp_raise_memory_limit() runs.
+        wp_raise_memory_limit( 'admin' );
+        if ( function_exists( 'set_time_limit' ) ) {
+            @set_time_limit( 300 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Scoped to the authenticated export request.
+        }
 
         $step = isset( $_POST['step'] ) ? sanitize_text_field( wp_unslash( $_POST['step'] ) ) : 'init';
         $session_id = isset( $_POST['session_id'] ) ? sanitize_text_field( wp_unslash( $_POST['session_id'] ) ) : '';
@@ -500,10 +513,380 @@ class WPCM_Plugin {
         }
     }
 
+    /**
+     * Return the maximum request body used by the adaptive streaming uploader.
+     *
+     * The client stays below PHP, WordPress and common reverse-proxy limits.
+     * A 64 MiB ceiling keeps requests comfortably below Cloudflare's 100 MB
+     * Free/Pro limit while still amortising WordPress bootstrap overhead.
+     *
+     * @return int Bytes.
+     */
+    private function stream_upload_chunk_limit() {
+        $hard_cap   = 64 * MB_IN_BYTES;
+        $candidates = array( $hard_cap );
+        $wp_limit   = (int) wp_max_upload_size();
+        if ( $wp_limit > 0 ) {
+            $candidates[] = (int) floor( $wp_limit * 0.80 );
+        }
+        foreach ( array( 'upload_max_filesize', 'post_max_size' ) as $setting ) {
+            $value = wp_convert_hr_to_bytes( (string) ini_get( $setting ) );
+            if ( is_int( $value ) && $value > 0 ) {
+                $candidates[] = (int) floor( $value * 0.80 );
+            }
+        }
+        $limit = min( $candidates );
+        $step  = 256 * KB_IN_BYTES;
+        $limit = (int) floor( max( $step, $limit ) / $step ) * $step;
+        return max( $step, $limit );
+    }
+
+    /**
+     * Initial adaptive upload request size.
+     *
+     * @return int Bytes.
+     */
+    private function stream_upload_initial_chunk() {
+        $limit = $this->stream_upload_chunk_limit();
+        $start = min( 16 * MB_IN_BYTES, $limit );
+        if ( $limit >= 8 * MB_IN_BYTES ) {
+            $start = max( 8 * MB_IN_BYTES, $start );
+        }
+        $step = 256 * KB_IN_BYTES;
+        return max( $step, (int) floor( $start / $step ) * $step );
+    }
+
+    /**
+     * Format an exact byte count for upload and validation messages.
+     *
+     * @param int $bytes Byte count.
+     * @return string
+     */
+    private function format_exact_transfer_size( $bytes ) {
+        $bytes = max( 0, (int) $bytes );
+        if ( $bytes >= GB_IN_BYTES ) {
+            $human = number_format_i18n( $bytes / GB_IN_BYTES, 2 ) . ' ' . __( 'GiB', 'clone-master' );
+        } elseif ( $bytes >= MB_IN_BYTES ) {
+            $human = number_format_i18n( $bytes / MB_IN_BYTES, 2 ) . ' ' . __( 'MiB', 'clone-master' );
+        } elseif ( $bytes >= KB_IN_BYTES ) {
+            $human = number_format_i18n( $bytes / KB_IN_BYTES, 1 ) . ' ' . __( 'KiB', 'clone-master' );
+        } else {
+            $human = number_format_i18n( $bytes, 0 ) . ' B';
+        }
+        return sprintf(
+            /* translators: 1: human-readable binary size, 2: exact byte count. */
+            __( '%1$s (%2$s bytes)', 'clone-master' ),
+            $human,
+            number_format_i18n( $bytes, 0 )
+        );
+    }
+
+    /**
+     * Read a positive integer sent in an upload request header.
+     *
+     * @param string $server_key Key in $_SERVER.
+     * @return int
+     */
+    private function upload_header_int( $server_key ) {
+        $raw = isset( $_SERVER[ $server_key ] ) ? trim( (string) wp_unslash( $_SERVER[ $server_key ] ) ) : '';
+        return preg_match( '/^[0-9]+$/', $raw ) ? (int) $raw : -1;
+    }
+
+    /**
+     * Send the current state of an offset-based upload.
+     *
+     * @param string $upload_id Upload identifier.
+     * @return void
+     */
+    private function send_offset_upload_status( $upload_id ) {
+        if ( ! preg_match( '/^upload_[a-z0-9]{20,64}$/', $upload_id ) ) {
+            wp_send_json_error( array( 'message' => __( 'Invalid upload session identifier.', 'clone-master' ) ), 400 );
+        }
+        $upload_dir = WPCM_TEMP_DIR . $upload_id . '/';
+        $state      = WPCM_Reliability::read_signed_json( $upload_dir . 'upload-state.json', 'chunk-upload:' . $upload_id );
+        if ( ! is_array( $state ) || 'offset-v1' !== (string) ( $state['protocol'] ?? '' ) ) {
+            wp_send_json_error( array( 'message' => __( 'The resumable upload session was not found.', 'clone-master' ) ), 404 );
+        }
+        wp_send_json_success( array(
+            'upload_id'      => $upload_id,
+            'expected_offset'=> (int) ( $state['offset'] ?? 0 ),
+            'total_size'     => (int) ( $state['total_size'] ?? 0 ),
+            'complete'       => ! empty( $state['completed'] ),
+            'file_path'      => ! empty( $state['completed'] ) ? $upload_dir . (string) $state['file_name'] : '',
+            'session_id'     => ! empty( $state['completed'] ) ? $upload_id : '',
+            'chunk_limit'    => $this->stream_upload_chunk_limit(),
+            'expires_at'     => (int) ( $state['updated_at'] ?? $state['created_at'] ?? time() ) + DAY_IN_SECONDS,
+        ) );
+    }
+
+    /**
+     * Handle a sequential, offset-based raw-body upload.
+     *
+     * Each request appends directly to one protected .partial file. This avoids
+     * storing hundreds of part files and avoids rewriting the complete archive
+     * during final assembly. The next import stage performs the full block-level
+     * WPCM validation and extraction.
+     *
+     * @return void
+     */
+    private function ajax_import_upload_offset() {
+        $nonce = isset( $_SERVER['HTTP_X_WPCM_NONCE'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_X_WPCM_NONCE'] ) ) : '';
+        if ( ! wp_verify_nonce( $nonce, 'wpcm_nonce' ) ) {
+            wp_send_json_error( array( 'message' => __( 'The WordPress security session expired. Reload the page and try again.', 'clone-master' ) ), 403 );
+        }
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( array( 'message' => __( 'Unauthorized request.', 'clone-master' ) ), 403 );
+        }
+
+        nocache_headers();
+        header( 'Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0', true );
+        header( 'X-LiteSpeed-Cache-Control: no-cache', true );
+        header( 'X-Accel-Expires: 0', true );
+
+        $upload_id = isset( $_SERVER['HTTP_X_WPCM_UPLOAD_ID'] ) ? sanitize_key( wp_unslash( $_SERVER['HTTP_X_WPCM_UPLOAD_ID'] ) ) : '';
+        $is_status = isset( $_SERVER['HTTP_X_WPCM_UPLOAD_STATUS'] ) && '1' === trim( (string) $_SERVER['HTTP_X_WPCM_UPLOAD_STATUS'] );
+        if ( $is_status ) {
+            $this->send_offset_upload_status( $upload_id );
+        }
+
+        $file_name  = isset( $_SERVER['HTTP_X_WPCM_FILE_NAME'] ) ? sanitize_file_name( rawurldecode( (string) wp_unslash( $_SERVER['HTTP_X_WPCM_FILE_NAME'] ) ) ) : '';
+        $file_size  = $this->upload_header_int( 'HTTP_X_WPCM_FILE_SIZE' );
+        $offset     = $this->upload_header_int( 'HTTP_X_WPCM_UPLOAD_OFFSET' );
+        $body_size  = isset( $_SERVER['CONTENT_LENGTH'] ) && preg_match( '/^[0-9]+$/', (string) $_SERVER['CONTENT_LENGTH'] ) ? (int) $_SERVER['CONTENT_LENGTH'] : -1;
+        $chunk_cap  = $this->stream_upload_chunk_limit();
+
+        if ( 'POST' !== strtoupper( (string) ( $_SERVER['REQUEST_METHOD'] ?? '' ) )
+            || 'wpcm' !== strtolower( pathinfo( $file_name, PATHINFO_EXTENSION ) )
+            || strlen( $file_name ) > 200
+            || $file_size < strlen( WPCM_Archive::MAGIC ) + WPCM_Archive::FOOTER_BYTES
+            || $offset < 0
+            || $offset > $file_size
+            || $body_size < 1
+            || $body_size > $chunk_cap
+            || $offset + $body_size > $file_size ) {
+            wp_send_json_error( array(
+                'message'     => __( 'Invalid resumable upload metadata or request size.', 'clone-master' ),
+                'chunk_limit' => $chunk_cap,
+            ), 400 );
+        }
+
+        if ( '' === $upload_id ) {
+            if ( 0 !== $offset ) {
+                wp_send_json_error( array( 'message' => __( 'A new upload must start at byte zero.', 'clone-master' ) ), 409 );
+            }
+            $upload_id = 'upload_' . strtolower( wp_generate_password( 32, false, false ) );
+        }
+        if ( ! preg_match( '/^upload_[a-z0-9]{20,64}$/', $upload_id ) ) {
+            wp_send_json_error( array( 'message' => __( 'Invalid upload session identifier.', 'clone-master' ) ), 400 );
+        }
+
+        $upload_dir  = WPCM_TEMP_DIR . $upload_id . '/';
+        $state_path  = $upload_dir . 'upload-state.json';
+        $partial     = $upload_dir . $file_name . '.partial';
+        $final_path  = $upload_dir . $file_name;
+        if ( ! wp_mkdir_p( $upload_dir ) ) {
+            wp_send_json_error( array( 'message' => __( 'Unable to create the protected upload workspace.', 'clone-master' ) ), 500 );
+        }
+        self::protect_directory( $upload_dir, false );
+        $lock = WPCM_Reliability::acquire_lock( $upload_dir . 'upload.lock' );
+        if ( false === $lock ) {
+            wp_send_json_error( array( 'message' => __( 'Another request is writing this upload session.', 'clone-master' ) ), 409 );
+        }
+
+        $output = null;
+        $input  = null;
+        try {
+            $context = 'chunk-upload:' . $upload_id;
+            $state   = WPCM_Reliability::read_signed_json( $state_path, $context );
+            if ( ! is_array( $state ) ) {
+                if ( 0 !== $offset ) {
+                    throw new RuntimeException( __( 'The upload session is missing; resume from the server offset.', 'clone-master' ) );
+                }
+                $state = array(
+                    'format'      => 4,
+                    'protocol'    => 'offset-v1',
+                    'upload_id'   => $upload_id,
+                    'file_name'   => $file_name,
+                    'total_size'  => $file_size,
+                    'offset'      => 0,
+                    'created_at'  => time(),
+                    'updated_at'  => time(),
+                    'completed'   => false,
+                );
+            }
+            if ( 'offset-v1' !== (string) ( $state['protocol'] ?? '' )
+                || (string) $state['file_name'] !== $file_name
+                || (int) $state['total_size'] !== $file_size ) {
+                throw new RuntimeException( __( 'Upload metadata does not match the resumable session.', 'clone-master' ) );
+            }
+            $expected_offset = (int) ( $state['offset'] ?? 0 );
+            if ( is_file( $final_path ) && (int) @filesize( $final_path ) === $file_size
+                && null !== WPCM_Archive::footer_payload_hash( $final_path ) ) {
+                $state['offset']       = $file_size;
+                $state['completed']    = true;
+                $state['completed_at'] = (int) ( $state['completed_at'] ?? time() );
+                $state['updated_at']   = time();
+                WPCM_Reliability::atomic_signed_json( $state_path, $state, $context );
+                $expected_offset = $file_size;
+            }
+            if ( $offset !== $expected_offset ) {
+                wp_send_json_error( array(
+                    'message'         => __( 'The upload offset changed. Clone Master can resume from the server position.', 'clone-master' ),
+                    'upload_id'       => $upload_id,
+                    'expected_offset' => $expected_offset,
+                    'chunk_limit'     => $chunk_cap,
+                ), 409 );
+            }
+            if ( ! empty( $state['completed'] ) && is_file( $final_path ) ) {
+                wp_send_json_success( array(
+                    'upload_id'       => $upload_id,
+                    'expected_offset' => $file_size,
+                    'complete'        => true,
+                    'file_path'       => $final_path,
+                    'session_id'      => $upload_id,
+                    'chunk_limit'     => $chunk_cap,
+                    'message'         => sprintf( __( 'Upload complete: %s received. Structural analysis is starting.', 'clone-master' ), $this->format_exact_transfer_size( $file_size ) ),
+                ) );
+            }
+
+            $disk_size = is_file( $partial ) ? (int) @filesize( $partial ) : 0;
+            if ( $disk_size !== $expected_offset ) {
+                throw new RuntimeException( __( 'The partial upload size does not match its authenticated state.', 'clone-master' ) );
+            }
+
+            $input = @fopen( 'php://input', 'rb' );
+            if ( ! is_resource( $input ) ) {
+                throw new RuntimeException( __( 'Unable to read the upload request body.', 'clone-master' ) );
+            }
+            if ( is_link( $partial ) ) {
+                throw new RuntimeException( __( 'The partial upload path is unsafe.', 'clone-master' ) );
+            }
+            $output = @fopen( $partial, 'c+b' );
+            if ( ! is_resource( $output ) ) {
+                throw new RuntimeException( __( 'Unable to open the partial WPCM upload.', 'clone-master' ) );
+            }
+            if ( 0 !== @fseek( $output, $expected_offset ) ) {
+                throw new RuntimeException( __( 'Unable to seek to the resumable upload offset.', 'clone-master' ) );
+            }
+
+            $received     = 0;
+            $prefix       = '';
+            $hash_context = hash_init( 'sha256' );
+            while ( $received < $body_size ) {
+                $bytes = fread( $input, min( MB_IN_BYTES, $body_size - $received ) );
+                if ( false === $bytes || '' === $bytes ) {
+                    throw new RuntimeException( __( 'The upload request ended before the declared chunk size.', 'clone-master' ) );
+                }
+                if ( 0 === $expected_offset && strlen( $prefix ) < strlen( WPCM_Archive::MAGIC ) ) {
+                    $prefix .= substr( $bytes, 0, strlen( WPCM_Archive::MAGIC ) - strlen( $prefix ) );
+                }
+                hash_update( $hash_context, $bytes );
+                WPCM_Archive::write_exact( $output, $bytes );
+                $received += strlen( $bytes );
+            }
+            if ( 0 === $expected_offset && WPCM_Archive::MAGIC !== $prefix ) {
+                throw new RuntimeException( __( 'The uploaded file is not a WP Commander compatible WPCMARCHIVE2 container.', 'clone-master' ) );
+            }
+            WPCM_Archive::flush( $output );
+            fclose( $output );
+            $output = null;
+            fclose( $input );
+            $input = null;
+
+            clearstatcache( true, $partial );
+            $new_offset = $expected_offset + $received;
+            if ( (int) @filesize( $partial ) !== $new_offset ) {
+                throw new RuntimeException( __( 'The partial upload was not written completely.', 'clone-master' ) );
+            }
+
+            $state['offset']      = $new_offset;
+            $state['updated_at']  = time();
+            $state['last_chunk']  = array(
+                'offset' => $expected_offset,
+                'size'   => $received,
+                'sha256' => hash_final( $hash_context ),
+            );
+            $complete = $new_offset === $file_size;
+            if ( $complete ) {
+                if ( null === WPCM_Archive::footer_payload_hash( $partial ) ) {
+                    throw new RuntimeException( __( 'The received archive does not contain a valid finalized WPCM footer.', 'clone-master' ) );
+                }
+                if ( ! @rename( $partial, $final_path ) ) {
+                    throw new RuntimeException( __( 'Unable to atomically publish the uploaded WPCM container.', 'clone-master' ) );
+                }
+                $state['completed']    = true;
+                $state['completed_at'] = time();
+            }
+            WPCM_Reliability::atomic_signed_json( $state_path, $state, $context );
+
+            $event_id = WPCM_Debug_Log::write( 'info', $complete ? 'upload_completed' : 'upload_chunk_verified', array(
+                'upload_id'       => $upload_id,
+                'protocol'        => 'offset-v1',
+                'offset'          => $new_offset,
+                'total_size'      => $file_size,
+                'chunk_size'      => $received,
+                'complete'        => $complete,
+            ) );
+            wp_send_json_success( array(
+                'event_id'        => $event_id,
+                'upload_id'       => $upload_id,
+                'expected_offset' => $new_offset,
+                'total_size'      => $file_size,
+                'chunk_size'      => $received,
+                'chunk_sha256'    => (string) $state['last_chunk']['sha256'],
+                'chunk_limit'     => $chunk_cap,
+                'complete'        => $complete,
+                'file_path'       => $complete ? $final_path : '',
+                'session_id'      => $complete ? $upload_id : '',
+                'message'         => $complete
+                    ? sprintf( __( 'Upload complete: %s received. Structural analysis is starting.', 'clone-master' ), $this->format_exact_transfer_size( $file_size ) )
+                    : sprintf( __( '%1$s received of %2$s.', 'clone-master' ), size_format( $new_offset ), size_format( $file_size ) ),
+            ) );
+        } catch ( Throwable $error ) {
+            if ( is_resource( $output ) ) {
+                @ftruncate( $output, max( 0, $offset ) );
+                @fflush( $output );
+                fclose( $output );
+            } elseif ( isset( $partial ) && is_file( $partial ) && ! is_link( $partial ) ) {
+                $rollback = @fopen( $partial, 'c+b' );
+                if ( is_resource( $rollback ) ) {
+                    @ftruncate( $rollback, max( 0, $offset ) );
+                    @fflush( $rollback );
+                    fclose( $rollback );
+                }
+            }
+            if ( is_resource( $input ) ) {
+                fclose( $input );
+            }
+            $event_id = WPCM_Debug_Log::throwable( 'upload_chunk_failed', $error, array(
+                'upload_id'  => $upload_id,
+                'protocol'   => 'offset-v1',
+                'offset'     => $offset,
+                'body_size'  => $body_size,
+                'file_name'  => $file_name,
+            ) );
+            wp_send_json_error( array(
+                'message'         => $error->getMessage(),
+                'upload_id'       => $upload_id,
+                'expected_offset' => is_array( $state ?? null ) ? (int) ( $state['offset'] ?? 0 ) : 0,
+                'chunk_limit'     => $chunk_cap,
+                'event_id'        => $event_id,
+            ), 400 );
+        } finally {
+            WPCM_Reliability::release_lock( $lock );
+        }
+    }
+
     // =========================================================================
     // AJAX: Import Upload : supports chunked uploads for large files
     // =========================================================================
     public function ajax_import_upload() {
+        $upload_protocol = isset( $_GET['upload_protocol'] ) ? sanitize_key( wp_unslash( $_GET['upload_protocol'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- The protocol branch verifies its nonce header.
+        if ( 'offset-v1' === $upload_protocol ) {
+            $this->ajax_import_upload_offset();
+            return;
+        }
+
         check_ajax_referer( 'wpcm_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) {
             wp_send_json_error( array( 'message' => __( 'Unauthorized request.', 'clone-master' ) ), 403 );
@@ -640,17 +1023,21 @@ class WPCM_Plugin {
                     } finally {
                         fclose( $output );
                     }
-                    WPCM_Archive::inspect( $assembling );
+                    $payload_hash = WPCM_Archive::footer_payload_hash( $assembling );
+                    if ( null === $payload_hash ) {
+                        wp_delete_file( $assembling );
+                        throw new RuntimeException( __( 'The received archive does not contain a valid finalized WPCM footer.', 'clone-master' ) );
+                    }
                     if ( ! @rename( $assembling, $final_path ) ) {
                         wp_delete_file( $assembling );
                         throw new RuntimeException( __( 'Unable to atomically publish the uploaded WPCM container.', 'clone-master' ) );
                     }
                     $state['completed']      = true;
-                    $state['archive_sha256'] = WPCM_Reliability::checksum( $final_path );
+                    $state['payload_sha256'] = $payload_hash;
                     $state['completed_at']   = time();
                     WPCM_Reliability::atomic_signed_json( $state_path, $state, $context );
-                } elseif ( $complete ) {
-                    WPCM_Archive::inspect( $final_path );
+                } elseif ( $complete && null === WPCM_Archive::footer_payload_hash( $final_path ) ) {
+                    throw new RuntimeException( __( 'The received archive does not contain a valid finalized WPCM footer.', 'clone-master' ) );
                 }
 
                 $event_id = WPCM_Debug_Log::write(
@@ -673,7 +1060,7 @@ class WPCM_Plugin {
                     'file_path'  => $complete ? $final_path : '',
                     'session_id' => $complete ? $upload_id : '',
                     'message'    => $complete
-                        ? sprintf( __( 'WPCM upload complete and fully verified (%s).', 'clone-master' ), size_format( filesize( $final_path ) ) )
+                        ? sprintf( __( 'Upload complete: %s received. Structural analysis is starting.', 'clone-master' ), $this->format_exact_transfer_size( (int) filesize( $final_path ) ) )
                         : sprintf( __( 'Chunk %1$d of %2$d stored and verified.', 'clone-master' ), $chunk_index + 1, $total_chunks ),
                 ) );
             } catch ( Throwable $error ) {
@@ -706,7 +1093,10 @@ class WPCM_Plugin {
         $final_path = $upload_dir . $name;
         try {
             WPCM_Reliability::atomic_copy( $temporary, $assembling, 0640 );
-            WPCM_Archive::inspect( $assembling );
+            $payload_hash = WPCM_Archive::footer_payload_hash( $assembling );
+            if ( null === $payload_hash ) {
+                throw new RuntimeException( __( 'The received archive does not contain a valid finalized WPCM footer.', 'clone-master' ) );
+            }
             if ( ! @rename( $assembling, $final_path ) ) {
                 throw new RuntimeException( __( 'Unable to atomically publish the uploaded WPCM container.', 'clone-master' ) );
             }
@@ -717,7 +1107,7 @@ class WPCM_Plugin {
                     'upload_id'      => $upload_id,
                     'file_name'      => $name,
                     'completed'      => true,
-                    'archive_sha256' => WPCM_Reliability::checksum( $final_path ),
+                    'payload_sha256' => $payload_hash,
                     'completed_at'   => time(),
                 ),
                 'chunk-upload:' . $upload_id
@@ -748,10 +1138,12 @@ class WPCM_Plugin {
         header( 'CDN-Cache-Control: no-store', true );
         header( 'Surrogate-Control: no-store', true );
 
-        @set_time_limit( 300 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Bounded import preparation.
-        @ini_set( 'memory_limit', '512M' ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Large manifest preparation.
+        @set_time_limit( 60 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Each adaptive request is deliberately short.
+        if ( function_exists( 'wp_raise_memory_limit' ) ) {
+            wp_raise_memory_limit( 'admin' );
+        }
 
-        $step        = isset( $_POST['step'] ) ? sanitize_key( wp_unslash( $_POST['step'] ) ) : 'extract';
+        $step        = isset( $_POST['step'] ) ? sanitize_key( wp_unslash( $_POST['step'] ) ) : 'analyze';
         $session_id  = isset( $_POST['session_id'] ) ? sanitize_text_field( wp_unslash( $_POST['session_id'] ) ) : '';
         $new_url     = isset( $_POST['new_url'] ) ? esc_url_raw( wp_unslash( $_POST['new_url'] ) ) : '';
         $request_id  = isset( $_POST['request_id'] ) ? sanitize_key( wp_unslash( $_POST['request_id'] ) ) : WPCM_Debug_Log::request_id();
@@ -929,6 +1321,7 @@ class WPCM_Plugin {
         $raw_name = isset( $_POST['backup_name'] ) ? wp_unslash( $_POST['backup_name'] ) : '';
         $backup   = $this->resolve_local_backup( (string) $raw_name );
         if ( null !== $backup && wp_delete_file( $backup['path'] ) ) {
+            $this->remove_download_links_for_backup( $backup['name'] );
             foreach ( array( $backup['path'] . '.sha256', $backup['path'] . '.sha256.bak' ) as $sidecar ) {
                 if ( is_file( $sidecar ) && WPCM_Reliability::path_is_within( $sidecar, WPCM_BACKUP_DIR ) ) {
                     wp_delete_file( $sidecar );
@@ -944,53 +1337,269 @@ class WPCM_Plugin {
     // =========================================================================
     public function ajax_download_backup() {
         check_ajax_referer( 'wpcm_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( esc_html__( 'Unauthorized request.', 'clone-master' ), '', array( 'response' => 403 ) );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'Unauthorized request.', 'clone-master' ), '', array( 'response' => 403 ) );
+        }
 
         $raw_name = isset( $_GET['backup_name'] ) ? wp_unslash( $_GET['backup_name'] ) : '';
         $backup   = $this->resolve_local_backup( (string) $raw_name );
         if ( null === $backup ) {
             wp_die( esc_html__( 'File not found.', 'clone-master' ), '', array( 'response' => 404 ) );
         }
+
+        // Preferred path: create a zero-copy hard link behind an unpredictable,
+        // short-lived capability URL. The next request is then served directly
+        // by Apache, LiteSpeed or Nginx instead of keeping PHP-FPM and an origin
+        // proxy connection occupied for a multi-gigabyte response.
+        $accelerated_url = $this->create_accelerated_download_url( $backup );
+        if ( is_string( $accelerated_url ) && '' !== $accelerated_url ) {
+            $server_software = isset( $_SERVER['SERVER_SOFTWARE'] ) ? (string) $_SERVER['SERVER_SOFTWARE'] : '';
+            $accelerated_uri = (string) wp_parse_url( $accelerated_url, PHP_URL_PATH );
+            if ( false !== stripos( $server_software, 'litespeed' ) && '' !== $accelerated_uri ) {
+                $ascii_name = str_replace( array( '"', "\r", "\n" ), '', $backup['name'] );
+                header( 'Content-Type: application/octet-stream' );
+                header( 'Content-Disposition: attachment; filename="' . $ascii_name . '"; filename*=UTF-8' . "''" . rawurlencode( $backup['name'] ) );
+                header( 'X-LiteSpeed-Location: ' . $accelerated_uri );
+                exit;
+            }
+            wp_safe_redirect( $accelerated_url, 302, 'Clone Master' );
+            exit;
+        }
+
+        // Portable fallback for hosts that forbid hard links. It supports byte
+        // ranges so interrupted transfers can resume instead of restarting.
+        $this->stream_backup_with_range_support( $backup );
+    }
+
+    /**
+     * Prepare the public capability directory used only for temporary downloads.
+     * Archive sources remain in the private, denied WPCM_BACKUP_DIR directory.
+     *
+     * @return bool
+     */
+    private function prepare_download_directory(): bool {
+        if ( ! is_dir( WPCM_DOWNLOAD_DIR ) && ! wp_mkdir_p( WPCM_DOWNLOAD_DIR ) ) {
+            return false;
+        }
+        WPCM_Reliability::atomic_write( WPCM_DOWNLOAD_DIR . 'index.html', '', 0644 );
+        WPCM_Reliability::atomic_write(
+            WPCM_DOWNLOAD_DIR . '.htaccess',
+            implode( "\n", array(
+                'Options -Indexes',
+                '<IfModule mod_mime.c>',
+                '    ForceType application/octet-stream',
+                '</IfModule>',
+                '<IfModule mod_headers.c>',
+                '    Header always set Content-Disposition "attachment"',
+                '    Header always set Cache-Control "private, no-store, no-cache, must-revalidate, max-age=0"',
+                '    Header always set X-Content-Type-Options "nosniff"',
+                '    Header always set Accept-Ranges "bytes"',
+                '</IfModule>',
+                '',
+            ) ),
+            0644
+        );
+        return is_writable( WPCM_DOWNLOAD_DIR );
+    }
+
+    /**
+     * Create a random temporary hard link for direct web-server delivery.
+     *
+     * @param array{name:string,path:string} $backup Resolved backup.
+     * @return string|null
+     */
+    private function create_accelerated_download_url( array $backup ): ?string {
+        if ( ! $this->prepare_download_directory() || ! function_exists( 'random_bytes' ) || ! function_exists( 'link' ) ) {
+            return null;
+        }
+        try {
+            $token = bin2hex( random_bytes( 32 ) );
+        } catch ( Throwable $error ) {
+            return null;
+        }
+        $token_dir = trailingslashit( WPCM_DOWNLOAD_DIR . $token );
+        if ( ! wp_mkdir_p( $token_dir ) ) {
+            return null;
+        }
+        WPCM_Reliability::atomic_write( $token_dir . 'index.html', '', 0644 );
+        $target = $token_dir . $backup['name'];
+
+        $linked = @link( $backup['path'], $target );
+        if ( ! $linked || ! is_file( $target ) || (int) @filesize( $target ) !== (int) @filesize( $backup['path'] ) ) {
+            if ( is_file( $target ) ) {
+                @unlink( $target );
+            }
+            @unlink( $token_dir . 'index.html' );
+            @rmdir( $token_dir );
+            return null;
+        }
+
+        WPCM_Reliability::atomic_write(
+            $token_dir . '.expires',
+            (string) ( time() + $this->download_link_ttl() ) . "\n",
+            0644
+        );
+        return WPCM_DOWNLOAD_URL . rawurlencode( $token ) . '/' . rawurlencode( $backup['name'] );
+    }
+
+    /**
+     * Remove expired temporary delivery links without touching private archives.
+     *
+     * @return void
+     */
+    public function cleanup_expired_download_links(): void {
+        if ( ! is_dir( WPCM_DOWNLOAD_DIR ) ) {
+            return;
+        }
+        $last = (int) get_transient( 'wpcm_download_cleanup' );
+        if ( $last > time() - HOUR_IN_SECONDS ) {
+            return;
+        }
+        set_transient( 'wpcm_download_cleanup', time(), HOUR_IN_SECONDS );
+        foreach ( glob( WPCM_DOWNLOAD_DIR . '[a-f0-9]*', GLOB_ONLYDIR ) ?: array() as $dir ) {
+            $expires_file = trailingslashit( $dir ) . '.expires';
+            $expires      = is_file( $expires_file ) ? (int) trim( (string) @file_get_contents( $expires_file ) ) : 0;
+            $mtime        = (int) @filemtime( $dir );
+            if ( ( $expires > 0 && $expires <= time() ) || ( 0 === $expires && $mtime < time() - DAY_IN_SECONDS ) ) {
+                foreach ( glob( trailingslashit( $dir ) . '*' ) ?: array() as $file ) {
+                    if ( is_file( $file ) || is_link( $file ) ) {
+                        @unlink( $file );
+                    }
+                }
+                @unlink( $expires_file );
+                @rmdir( $dir );
+            }
+        }
+    }
+
+    /**
+     * Remove temporary direct links for a deleted private archive.
+     *
+     * @param string $name Published archive basename.
+     * @return void
+     */
+    private function remove_download_links_for_backup( string $name ): void {
+        if ( ! is_dir( WPCM_DOWNLOAD_DIR ) ) {
+            return;
+        }
+        foreach ( glob( WPCM_DOWNLOAD_DIR . '[a-f0-9]*', GLOB_ONLYDIR ) ?: array() as $dir ) {
+            $target = trailingslashit( $dir ) . $name;
+            if ( is_file( $target ) || is_link( $target ) ) {
+                @unlink( $target );
+            }
+            $remaining = array_values( array_filter( glob( trailingslashit( $dir ) . '*' ) ?: array(), 'is_file' ) );
+            if ( count( $remaining ) <= 1 ) {
+                @unlink( trailingslashit( $dir ) . 'index.html' );
+                @unlink( trailingslashit( $dir ) . '.expires' );
+                @rmdir( $dir );
+            }
+        }
+    }
+
+    /**
+     * Configurable lifetime of a capability download URL.
+     *
+     * @return int Seconds.
+     */
+    private function download_link_ttl(): int {
+        return max( 15 * MINUTE_IN_SECONDS, min( DAY_IN_SECONDS, (int) apply_filters( 'wpcm_download_link_ttl', 2 * HOUR_IN_SECONDS ) ) );
+    }
+
+    /**
+     * Stream a backup with RFC 7233-style single-range support.
+     *
+     * @param array{name:string,path:string} $backup Resolved backup.
+     * @return void
+     */
+    private function stream_backup_with_range_support( array $backup ): void {
         $name = $backup['name'];
         $path = $backup['path'];
+        $size = @filesize( $path );
+        if ( false === $size || $size < 0 ) {
+            wp_die( esc_html__( 'Unable to open the backup archive.', 'clone-master' ), '', array( 'response' => 500 ) );
+        }
 
-        $size   = filesize( $path );
-        $handle = fopen( $path, 'rb' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Binary file streaming for download.
-        if ( false === $size || ! is_resource( $handle ) ) {
+        $mtime = (int) @filemtime( $path );
+        $etag  = '"wpcm-' . dechex( (int) $size ) . '-' . dechex( max( 0, $mtime ) ) . '"';
+        $start = 0;
+        $end   = max( 0, (int) $size - 1 );
+        $status = 200;
+        $range_header = isset( $_SERVER['HTTP_RANGE'] ) ? trim( (string) wp_unslash( $_SERVER['HTTP_RANGE'] ) ) : '';
+        $if_range     = isset( $_SERVER['HTTP_IF_RANGE'] ) ? trim( (string) wp_unslash( $_SERVER['HTTP_IF_RANGE'] ) ) : '';
+        if ( '' !== $range_header && '' !== $if_range && $if_range !== $etag && ( $mtime <= 0 || strtotime( $if_range ) !== $mtime ) ) {
+            $range_header = '';
+        }
+        if ( '' !== $range_header ) {
+            if ( ! preg_match( '/^bytes=(\d*)-(\d*)$/', $range_header, $match ) || ( '' === $match[1] && '' === $match[2] ) ) {
+                status_header( 416 );
+                header( 'Content-Range: bytes */' . (int) $size );
+                exit;
+            }
+            if ( '' === $match[1] ) {
+                $suffix = min( (int) $size, max( 0, (int) $match[2] ) );
+                $start  = max( 0, (int) $size - $suffix );
+            } else {
+                $start = (int) $match[1];
+            }
+            if ( '' !== $match[2] ) {
+                $end = min( $end, (int) $match[2] );
+            }
+            if ( $start > $end || $start >= (int) $size ) {
+                status_header( 416 );
+                header( 'Content-Range: bytes */' . (int) $size );
+                exit;
+            }
+            $status = 206;
+        }
+
+        $handle = @fopen( $path, 'rb' );
+        if ( ! is_resource( $handle ) || 0 !== @fseek( $handle, $start ) ) {
             if ( is_resource( $handle ) ) {
-                fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+                fclose( $handle );
             }
             wp_die( esc_html__( 'Unable to open the backup archive.', 'clone-master' ), '', array( 'response' => 500 ) );
         }
 
-        // Disable output buffering for streaming.
-        while ( ob_get_level() ) ob_end_clean();
-        @ini_set( 'zlib.output_compression', 'Off' ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required for binary streaming
-        @set_time_limit( 0 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Required for large file downloads
+        while ( ob_get_level() ) {
+            ob_end_clean();
+        }
+        @ini_set( 'zlib.output_compression', 'Off' );
+        @set_time_limit( 0 );
+        ignore_user_abort( true );
 
+        $length     = $end - $start + 1;
         $ascii_name = str_replace( array( '"', "\r", "\n" ), '', $name );
+        status_header( $status );
         header( 'Content-Type: application/octet-stream' );
         header( 'Content-Disposition: attachment; filename="' . $ascii_name . '"; filename*=UTF-8' . "''" . rawurlencode( $name ) );
-        header( 'Content-Length: ' . (int) $size );
-        header( 'Content-Transfer-Encoding: binary' );
+        header( 'Content-Length: ' . $length );
+        header( 'Accept-Ranges: bytes' );
+        header( 'ETag: ' . $etag );
+        if ( $mtime > 0 ) {
+            header( 'Last-Modified: ' . gmdate( 'D, d M Y H:i:s', $mtime ) . ' GMT' );
+        }
+        header( 'X-Accel-Buffering: no' );
         header( 'Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0' );
         header( 'CDN-Cache-Control: no-store' );
-        header( 'Surrogate-Control: no-store' );
         header( 'X-LiteSpeed-Cache-Control: no-cache' );
-        header( 'Pragma: no-cache' );
+        if ( 206 === $status ) {
+            header( 'Content-Range: bytes ' . $start . '-' . $end . '/' . (int) $size );
+        }
 
-        // Stream in 8 MiB chunks instead of loading the archive into memory.
-        while ( ! feof( $handle ) ) {
-            $chunk = fread( $handle, 8 * 1024 * 1024 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fread -- Binary WPCM streaming.
-            if ( false === $chunk ) {
+        $remaining = $length;
+        while ( $remaining > 0 && ! feof( $handle ) ) {
+            $chunk = fread( $handle, min( 8 * MB_IN_BYTES, $remaining ) );
+            if ( false === $chunk || '' === $chunk ) {
                 break;
             }
-            echo $chunk; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaping would corrupt WPCM data.
+            echo $chunk; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Binary archive bytes.
+            $remaining -= strlen( $chunk );
             flush();
         }
-        fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+        fclose( $handle );
         exit;
     }
+
 
     // =========================================================================
     // AJAX: Persistent diagnostics

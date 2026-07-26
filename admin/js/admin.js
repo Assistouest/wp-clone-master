@@ -2,7 +2,7 @@
     'use strict';
 
     const { createElement: h, useState, useEffect, useRef, useCallback, Fragment, Component } = wp.element;
-    const { __ } = wp.i18n;
+    const { __, sprintf } = wp.i18n;
 
     /* =========================================================
        Helpers API
@@ -147,6 +147,81 @@
         const amount = bytes / Math.pow(1024, unit);
         const precision = unit === 0 || amount >= 100 ? 0 : (amount >= 10 ? 1 : 2);
         return amount.toFixed(precision) + ' ' + units[unit];
+    }
+
+
+    function formatBinaryBytes(value, exact = false) {
+        const bytes = Number(value);
+        if (!Number.isFinite(bytes) || bytes < 0) return 'N/A';
+        const units = [ 'B', __( 'KiB', 'clone-master' ), __( 'MiB', 'clone-master' ), __( 'GiB', 'clone-master' ), 'TiB' ];
+        const unit = bytes > 0 ? Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1) : 0;
+        const amount = unit === 0 ? bytes : bytes / Math.pow(1024, unit);
+        const digits = unit === 0 ? 0 : (amount >= 100 ? 0 : (amount >= 10 ? 1 : 2));
+        const human = new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: digits }).format(amount) + ' ' + units[unit];
+        if (!exact) return human;
+        return sprintf(
+            __( '%1$s (%2$s bytes)', 'clone-master' ),
+            human,
+            new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(bytes)
+        );
+    }
+
+    function createRestoreLogTracker() {
+        return { step: '', milestone: -1, adaptive: '' };
+    }
+
+    function logRestoreUpdate(tracker, step, data, log) {
+        const progress = Math.max(0, Math.min(100, Number(data.progress || 0)));
+        const milestone = Math.floor(progress / 10) * 10;
+        const adaptive = [
+            data.adaptive_budget || '',
+            data.page_size || '',
+            data.adaptive_reason || ''
+        ].join('|');
+        const phaseChanged = tracker.step !== step;
+        const milestoneChanged = milestone > tracker.milestone;
+        const adaptiveChanged = adaptive !== '||' && adaptive !== tracker.adaptive;
+        if (phaseChanged || milestoneChanged || adaptiveChanged || !data.next_step) {
+            log(data.message || step + ' ' + __( 'complete', 'clone-master' ), data.next_step ? '' : 'success');
+            tracker.step = step;
+            tracker.milestone = milestone;
+            tracker.adaptive = adaptive;
+        }
+    }
+
+    async function validateArchiveAdaptively(baseRequest, log, onUpdate) {
+        let result = await apiRetry('wpcm_import', { ...baseRequest, step: 'analyze', session_id: '' }, MAX_RETRIES, log);
+        let lastMilestone = 0;
+        let lastSlice = Number(result.next_slice_bytes || 0);
+        if (typeof onUpdate === 'function') onUpdate(result);
+        log(result.message || __( 'Archive structure indexed. Adaptive validation is starting.', 'clone-master' ));
+
+        while (result.next_step === 'extract') {
+            result = await apiRetry('wpcm_import', {
+                ...baseRequest,
+                step: 'extract',
+                session_id: result.session_id
+            }, MAX_RETRIES, log);
+            if (typeof onUpdate === 'function') onUpdate(result);
+
+            const progress = Math.max(0, Math.min(100, Number(result.progress || 0)));
+            const milestone = Math.floor(progress / 25) * 25;
+            const slice = Number(result.next_slice_bytes || 0);
+            if (slice > 0 && lastSlice > 0 && Math.abs(slice - lastSlice) >= 4 * 1024 * 1024) {
+                log(sprintf(
+                    __( 'Adaptive validation block adjusted to %s.', 'clone-master' ),
+                    formatBinaryBytes(slice)
+                ));
+            }
+            if (milestone > lastMilestone && milestone < 100) {
+                lastMilestone = milestone;
+                log(result.message || sprintf(__( 'Archive validation: %d%%.', 'clone-master' ), milestone));
+            }
+            lastSlice = slice || lastSlice;
+        }
+
+        log(result.message || __( 'Archive validation completed.', 'clone-master' ), 'success');
+        return result;
     }
 
     async function apiRetry(action, data, retries = MAX_RETRIES, log = null) {
@@ -458,55 +533,120 @@
        ========================================================= */
     function DbPhaseDetail({ dbInfo }) {
         if (!dbInfo) return null;
-        const { tableIdx, totalTables, tableName, elapsedSec, calls, rowsPerCall } = dbInfo;
-        const pct = totalTables > 0 ? Math.round(100 * tableIdx / totalTables) : 0;
+        const {
+            tableIdx, totalTables, tableName, elapsedSec, calls, rowsPerCall,
+            rowsProcessed, rowsExported, rowsTotal, batchSeconds, batchSqlBytes,
+            batchMemoryPeak, batchMemoryLimit, batchReason, batchTargetSeconds,
+            batchTargetSqlBytes, batchRowCap
+        } = dbInfo;
+        const tablePct = rowsTotal > 0
+            ? Math.min(100, Math.round(100 * rowsExported / rowsTotal))
+            : 0;
+        const tablesPct = totalTables > 0 ? Math.round(100 * tableIdx / totalTables) : 0;
         const mins = Math.floor(elapsedSec / 60);
         const secs = elapsedSec % 60;
-        const elapsed = mins > 0
-            ? mins + 'min ' + secs + 's'
-            : secs + 's';
+        const elapsed = mins > 0 ? mins + 'min ' + secs + 's' : secs + 's';
+        const reasonLabels = {
+            increased: __( 'Increased after two fast, low-resource calls', 'clone-master' ),
+            learning: __( 'Measuring server capacity', 'clone-master' ),
+            reduced_memory: __( 'Reduced to protect PHP memory', 'clone-master' ),
+            reduced_time: __( 'Reduced to stay within the time budget', 'clone-master' ),
+            reduced_sql: __( 'Reduced to limit generated SQL volume', 'clone-master' ),
+            limited_row_size: __( 'Limited by the average row size', 'clone-master' ),
+            stable: __( 'Stable', 'clone-master' )
+        };
+        const reason = reasonLabels[batchReason] || reasonLabels.stable;
+        const memoryText = batchMemoryLimit > 0
+            ? formatBytes(batchMemoryPeak) + ' / ' + formatBytes(batchMemoryLimit)
+            : formatBytes(batchMemoryPeak);
 
         return h('div', { className: 'wpcm-db-detail' },
-            // Row 1: current table
             h('div', { className: 'wpcm-db-detail-row' },
                 h(Ico, { n: 'db', s: 13 }),
                 h('span', { className: 'wpcm-db-detail-label' },
                     __( 'Current table:', 'clone-master' ), ' ',
                     h('strong', null, tableName || '…')
                 ),
-                h('span', { className: 'wpcm-db-detail-value' },
-                    tableIdx, ' / ', totalTables
-                )
+                h('span', { className: 'wpcm-db-detail-value' }, tableIdx, ' / ', totalTables)
             ),
-            // Row 2: per-table progress bar
             h('div', { className: 'wpcm-db-detail-row', style: { gap: '8px' } },
-                h('span', { style: { fontSize: '11px', color: 'var(--c-text-dim)', flexShrink: 0, width: '100px' } },
-                    __( 'Tables exported', 'clone-master' )
+                h('span', { className: 'wpcm-db-detail-caption' },
+                    rowsTotal > 0 ? __( 'Current table', 'clone-master' ) : __( 'Tables exported', 'clone-master' )
                 ),
                 h('div', { className: 'wpcm-db-table-bar' },
-                    h('div', { className: 'wpcm-db-table-bar-fill', style: { width: pct + '%' } })
+                    h('div', { className: 'wpcm-db-table-bar-fill', style: { width: (rowsTotal > 0 ? tablePct : tablesPct) + '%' } })
                 ),
-                h('span', { className: 'wpcm-db-detail-value' }, pct + '%')
+                h('span', { className: 'wpcm-db-detail-value' },
+                    rowsTotal > 0
+                        ? rowsExported.toLocaleString() + ' / ' + rowsTotal.toLocaleString()
+                        : tablesPct + '%'
+                )
             ),
-            // Row 3: elapsed time / call counter
             h('div', { className: 'wpcm-db-detail-row' },
                 h(Ico, { n: 'clock', s: 13 }),
                 h('span', { className: 'wpcm-db-detail-label' },
-                    __( 'Elapsed time:', 'clone-master' ), ' ',
-                    h('strong', null, elapsed)
+                    __( 'Elapsed time:', 'clone-master' ), ' ', h('strong', null, elapsed)
                 ),
-                h('span', { className: 'wpcm-db-detail-value', style: { color: 'var(--c-text-dim)' } },
-                    calls, ' ', __( 'calls', 'clone-master' )
-                )
+                h('span', { className: 'wpcm-db-detail-value wpcm-db-detail-muted' }, calls, ' ', __( 'calls', 'clone-master' ))
             ),
-            // Row 4: adaptive batch size
-            rowsPerCall && h('div', { className: 'wpcm-db-detail-row' },
+            rowsPerCall && h('div', { className: 'wpcm-db-detail-row wpcm-db-adaptive-row' },
                 h(Ico, { n: 'layers', s: 13 }),
                 h('span', { className: 'wpcm-db-detail-label' },
-                    __( 'Adaptive batch:', 'clone-master' ), ' ',
-                    h('strong', null, rowsPerCall + ' ' + __( 'rows/call', 'clone-master' ))
-                )
+                    __( 'Next adaptive batch:', 'clone-master' ), ' ',
+                    h('strong', null, Number(rowsPerCall).toLocaleString() + ' ' + __( 'rows/call', 'clone-master' ))
+                ),
+                h('span', { className: 'wpcm-db-batch-status ' + (batchReason || 'stable') }, reason)
+            ),
+            batchSeconds !== null && batchSeconds !== undefined && h('div', { className: 'wpcm-db-metrics' },
+                h('span', null, h('strong', null, __( 'Last call', 'clone-master' )), ' ', Number(batchSeconds).toFixed(2) + ' s'),
+                h('span', null, h('strong', null, __( 'Rows', 'clone-master' )), ' ', Number(rowsProcessed || 0).toLocaleString()),
+                h('span', null, h('strong', null, __( 'SQL', 'clone-master' )), ' ', formatBytes(batchSqlBytes || 0)),
+                h('span', null, h('strong', null, __( 'Peak memory', 'clone-master' )), ' ', memoryText)
+            ),
+            batchTargetSeconds && h('div', { className: 'wpcm-db-target' },
+                __( 'Automatic target:', 'clone-master' ), ' ≤ ', Number(batchTargetSeconds).toFixed(1), ' s · ≤ ',
+                formatBytes(batchTargetSqlBytes || 0),
+                batchRowCap ? ' · ' + __( 'safe ceiling', 'clone-master' ) + ' ' + Number(batchRowCap).toLocaleString() : ''
             )
+        );
+    }
+
+    function formatDuration(seconds) {
+        const value = Math.max(0, Math.round(Number(seconds) || 0));
+        if (value < 60) return value + ' s';
+        const minutes = Math.floor(value / 60);
+        const remainder = value % 60;
+        if (minutes < 60) return minutes + ' min ' + remainder + ' s';
+        const hours = Math.floor(minutes / 60);
+        return hours + ' h ' + (minutes % 60) + ' min';
+    }
+
+    function ExportPhaseRail({ phase }) {
+        const phases = [
+            ['preparing', __( 'Preparation', 'clone-master' )],
+            ['inventory', __( 'Exact inventory', 'clone-master' )],
+            ['database', __( 'Database', 'clone-master' )],
+            ['archive', __( 'Archive creation', 'clone-master' )],
+            ['finalizing', __( 'Verification', 'clone-master' )]
+        ];
+        const active = Math.max(0, phases.findIndex(item => item[0] === phase));
+        return h('div', { className: 'wpcm-export-phase-rail', role: 'list', 'aria-label': __( 'Export stages', 'clone-master' ) },
+            phases.map((item, index) => h('div', {
+                key: item[0],
+                className: 'wpcm-export-phase' + (index < active ? ' is-done' : '') + (index === active ? ' is-current' : ''),
+                role: 'listitem'
+            },
+                h('span', { className: 'wpcm-export-phase-dot' }, index < active ? h(Ico, { n: 'check', s: 11 }) : index + 1),
+                h('span', null, item[1])
+            ))
+        );
+    }
+
+    function ExportStat({ label, value, hint }) {
+        return h('div', { className: 'wpcm-export-stat' },
+            h('span', { className: 'wpcm-export-stat-label' }, label),
+            h('strong', { className: 'wpcm-export-stat-value' }, value),
+            hint && h('span', { className: 'wpcm-export-stat-hint' }, hint)
         );
     }
 
@@ -518,8 +658,14 @@
         const [result, setResult] = useState(null);
         const [logs, setLogs] = useState([]);
         const [error, setError] = useState(null);
-        // Details for the chunked database phase.
         const [dbInfo, setDbInfo] = useState(null);
+        const [exportInfo, setExportInfo] = useState({
+            phase: 'preparing', inventoryReady: false, files: 0, directories: 0,
+            sourceBytes: 0, filesBytes: 0, databaseBytes: 0, excludedCount: 0,
+            excludedBytes: 0, bytesDone: 0, bytesTotal: 0, filesDone: 0,
+            speed: 0, eta: 0, currentFile: '', currentDone: 0, currentTotal: 0,
+            workerBytes: 0, workerTime: 0, workerReason: '', memoryPeak: 0, memoryLimit: 0
+        });
         const startTimeRef = useRef(null);
         const dbCallsRef = useRef(0);
 
@@ -527,14 +673,45 @@
             setLogs(p => [...p, { time: new Date().toLocaleTimeString(), msg, type }]);
         }, []);
 
-        // Extract database progress details from the server message.
-        // Format: "Database: table 3/12 : exporting wp_posts…"
         const parseDbMessage = useCallback((msg) => {
             if (!msg) return null;
-            // Accept both translated and English message formats.
             const m = msg.match(/(\d+)\/(\d+)[^a-zA-Z_]*([a-zA-Z0-9_]+[^\s…]*)/);
             if (!m) return null;
             return { tableIdx: parseInt(m[1], 10), totalTables: parseInt(m[2], 10), tableName: m[3] };
+        }, []);
+
+        const mergeExportInfo = useCallback((d, step) => {
+            const phase = d.phase || (
+                step === 'database' ? 'database' :
+                step === 'files_scan' ? 'inventory' :
+                step === 'files_archive' ? 'archive' :
+                ['config', 'package', 'cleanup'].includes(step) ? 'finalizing' : 'preparing'
+            );
+            setExportInfo(previous => ({
+                ...previous,
+                phase,
+                inventoryReady: Boolean(d.inventory_ready || previous.inventoryReady),
+                files: Number.isFinite(Number(d.inventory_files)) ? Number(d.inventory_files) : previous.files,
+                directories: Number.isFinite(Number(d.inventory_directories)) ? Number(d.inventory_directories) : previous.directories,
+                sourceBytes: Number.isFinite(Number(d.inventory_source_bytes)) && Number(d.inventory_source_bytes) > 0 ? Number(d.inventory_source_bytes) : previous.sourceBytes,
+                filesBytes: Number.isFinite(Number(d.inventory_files_bytes)) ? Number(d.inventory_files_bytes) : previous.filesBytes,
+                databaseBytes: Number.isFinite(Number(d.inventory_database_bytes)) ? Number(d.inventory_database_bytes) : previous.databaseBytes,
+                excludedCount: Number.isFinite(Number(d.excluded_backup_count)) ? Number(d.excluded_backup_count) : previous.excludedCount,
+                excludedBytes: Number.isFinite(Number(d.excluded_backup_bytes)) ? Number(d.excluded_backup_bytes) : previous.excludedBytes,
+                bytesDone: Number.isFinite(Number(d.archive_bytes_done)) ? Number(d.archive_bytes_done) : previous.bytesDone,
+                bytesTotal: Number.isFinite(Number(d.archive_bytes_total)) ? Number(d.archive_bytes_total) : previous.bytesTotal,
+                filesDone: Number.isFinite(Number(d.archive_files_done)) ? Number(d.archive_files_done) : previous.filesDone,
+                speed: Number.isFinite(Number(d.archive_speed_bps)) ? Number(d.archive_speed_bps) : previous.speed,
+                eta: Number.isFinite(Number(d.archive_eta_seconds)) ? Number(d.archive_eta_seconds) : previous.eta,
+                currentFile: d.current_file || previous.currentFile,
+                currentDone: Number.isFinite(Number(d.current_file_done)) ? Number(d.current_file_done) : previous.currentDone,
+                currentTotal: Number.isFinite(Number(d.current_file_size)) ? Number(d.current_file_size) : previous.currentTotal,
+                workerBytes: Number.isFinite(Number(d.archive_worker_bytes)) ? Number(d.archive_worker_bytes) : previous.workerBytes,
+                workerTime: Number.isFinite(Number(d.archive_worker_time)) ? Number(d.archive_worker_time) : previous.workerTime,
+                workerReason: d.archive_worker_reason || previous.workerReason,
+                memoryPeak: Number.isFinite(Number(d.archive_memory_peak)) ? Number(d.archive_memory_peak) : previous.memoryPeak,
+                memoryLimit: Number.isFinite(Number(d.archive_memory_limit)) ? Number(d.archive_memory_limit) : previous.memoryLimit
+            }));
         }, []);
 
         const run = async () => {
@@ -542,21 +719,22 @@
             setOperationBusy(true, __( 'Backup in progress', 'clone-master' ));
             setRunning(true); setProgress(0); setDone(false); setResult(null);
             setError(null); setLogs([]); setDbInfo(null);
+            setExportInfo({ phase: 'preparing', inventoryReady: false, files: 0, directories: 0, sourceBytes: 0, filesBytes: 0, databaseBytes: 0, excludedCount: 0, excludedBytes: 0, bytesDone: 0, bytesTotal: 0, filesDone: 0, speed: 0, eta: 0, currentFile: '', currentDone: 0, currentTotal: 0, workerBytes: 0, workerTime: 0, workerReason: '', memoryPeak: 0, memoryLimit: 0 });
             startTimeRef.current = Date.now();
             dbCallsRef.current = 0;
             let sid = '', next = 'init';
-            let inDbPhase = false;
-            let lastCursorToken = '';
-            let unchangedCursorResponses = 0;
+            let inDbPhase = false, inScanPhase = false, inArchivePhase = false;
+            let lastCursorToken = '', unchangedCursorResponses = 0;
             try {
                 while (next) {
-                    const d = await apiRetry('wpcm_export', { step: next, session_id: sid }, MAX_RETRIES, log);
+                    const step = next;
+                    const d = await apiRetry('wpcm_export', { step, session_id: sid }, MAX_RETRIES, log);
                     sid = d.session_id || sid;
-                    setProgress(d.progress || 0);
+                    setProgress(Number(d.progress) || 0);
                     setMessage(d.message || '');
+                    mergeExportInfo(d, step);
 
-                    // Update the database panel without adding a new log entry.
-                    if (next === 'database' && d.next_step === 'database') {
+                    if (step === 'database' && d.next_step === 'database') {
                         inDbPhase = true;
                         dbCallsRef.current++;
                         if (d.cursor_token) {
@@ -567,101 +745,140 @@
                                 throw new Error(__( 'The authenticated database cursor did not advance after several requests. The export was stopped safely. Start a new backup; if the problem persists, inspect the diagnostic details rather than repeatedly purging caches.', 'clone-master' ));
                             }
                         }
-                        const parsed = parseDbMessage(d.message);
+                        const parsed = parseDbMessage(d.message) || {};
                         const elapsed = Math.round((Date.now() - startTimeRef.current) / 1000);
-                        if (parsed) {
-                            setDbInfo({ ...parsed, elapsedSec: elapsed, calls: dbCallsRef.current, rowsPerCall: d.rows_per_call || null });
+                        const tableIdx = Number.isFinite(Number(d.table_index)) ? Number(d.table_index) : parsed.tableIdx;
+                        const totalTables = Number.isFinite(Number(d.table_count)) ? Number(d.table_count) : parsed.totalTables;
+                        const tableName = d.current_table || parsed.tableName || '';
+                        if (Number.isFinite(tableIdx) && Number.isFinite(totalTables)) {
+                            setDbInfo({
+                                tableIdx, totalTables, tableName, elapsedSec: elapsed, calls: dbCallsRef.current,
+                                rowsPerCall: d.rows_per_call || null, rowsProcessed: d.rows_processed || 0,
+                                rowsExported: d.rows_exported || 0, rowsTotal: d.rows_total || 0,
+                                batchSeconds: d.batch_seconds, batchSqlBytes: d.batch_sql_bytes || 0,
+                                batchMemoryPeak: d.batch_memory_peak || 0, batchMemoryLimit: d.batch_memory_limit || 0,
+                                batchReason: d.batch_reason || 'stable', batchTargetSeconds: d.batch_target_seconds || 0,
+                                batchTargetSqlBytes: d.batch_target_sql_bytes || 0, batchRowCap: d.batch_row_cap || 0
+                            });
                         }
-                        // Update the latest database entry instead of flooding the log.
-                        setLogs(prev => {
-                            const last = prev[prev.length - 1];
-                            const isDbEntry = last && last.isDb;
+                        setLogs(previous => {
+                            const last = previous[previous.length - 1];
                             const entry = { time: new Date().toLocaleTimeString(), msg: d.message || '', type: '', isDb: true };
-                            return isDbEntry ? [...prev.slice(0, -1), entry] : [...prev, entry];
+                            return last && last.isDb ? [...previous.slice(0, -1), entry] : [...previous, entry];
+                        });
+                    } else if (step === 'files_scan' && d.next_step === 'files_scan') {
+                        inScanPhase = true;
+                        setLogs(previous => {
+                            const last = previous[previous.length - 1];
+                            const entry = { time: new Date().toLocaleTimeString(), msg: d.message || '', type: d.excluded_backup_count > 0 ? 'warn' : '', isScan: true };
+                            return last && last.isScan ? [...previous.slice(0, -1), entry] : [...previous, entry];
+                        });
+                    } else if (step === 'files_archive' && d.next_step === 'files_archive') {
+                        inArchivePhase = true;
+                        setLogs(previous => {
+                            const last = previous[previous.length - 1];
+                            const entry = { time: new Date().toLocaleTimeString(), msg: d.message || '', type: '', isArchive: true };
+                            return last && last.isArchive ? [...previous.slice(0, -1), entry] : [...previous, entry];
                         });
                     } else {
-                        // Completed phase or another step: use a normal log entry
-                        if (inDbPhase && next === 'database') {
-                            // Last database call transitions to files_scan
-                            inDbPhase = false;
-                            setDbInfo(null);
-                            log(d.message || __( 'Database export complete.', 'clone-master' ), 'success');
-                        } else {
-                            log(d.message || next + ' ' + __( 'complete', 'clone-master' ), 'success');
-                        }
+                        if (inDbPhase && step === 'database') { inDbPhase = false; setDbInfo(null); log(d.message || __( 'Database export complete.', 'clone-master' ), 'success'); }
+                        else if (inScanPhase && step === 'files_scan') { inScanPhase = false; log(d.message || __( 'Exact inventory complete.', 'clone-master' ), d.excluded_backup_count > 0 ? 'warn' : 'success'); }
+                        else if (inArchivePhase && step === 'files_archive') { inArchivePhase = false; log(d.message || __( 'Archive creation complete.', 'clone-master' ), 'success'); }
+                        else log(d.message || step + ' ' + __( 'complete', 'clone-master' ), 'success');
                     }
 
                     if (d.download_url) setResult(d);
                     next = d.next_step || null;
                 }
                 setDone(true); setDbInfo(null);
+                setExportInfo(previous => ({ ...previous, phase: 'done', eta: 0 }));
                 log(__( 'Backup created successfully.', 'clone-master' ), 'success');
             } catch (e) {
-                setError(e.message);
-                setDbInfo(null);
+                setError(e.message); setDbInfo(null);
                 log(__( 'Error: ', 'clone-master' ) + e.message, 'error');
             } finally { setRunning(false); setOperationBusy(false); }
         };
 
-        // Active database phase uses an indeterminate progress bar
-        const isDbPhase = running && dbInfo !== null;
+        const phaseTitles = {
+            preparing: __( 'Preparing a reliable export', 'clone-master' ),
+            database: __( 'Exporting the database', 'clone-master' ),
+            inventory: exportInfo.inventoryReady ? __( 'Exact inventory completed', 'clone-master' ) : __( 'Building the exact site inventory', 'clone-master' ),
+            archive: __( 'Creating the archive', 'clone-master' ),
+            finalizing: __( 'Verifying and publishing the archive', 'clone-master' ),
+            done: __( 'Backup complete', 'clone-master' )
+        };
+        const totalSource = exportInfo.sourceBytes || exportInfo.bytesTotal;
+        const elapsed = startTimeRef.current ? Math.round((Date.now() - startTimeRef.current) / 1000) : 0;
 
         return h(Fragment, null,
             h('div', { className: 'wpcm-intro' },
                 h('div', { className: 'wpcm-intro-ico' }, h(Ico, { n: 'export', s: 18 })),
                 h('div', null,
                     h('h4', null, __( 'Complete backup of your site', 'clone-master' )),
-                    h('p', null, __( 'Your database, themes, plugins, media and configuration files are securely archived. You can then restore them on any host.', 'clone-master' ))
+                    h('p', null, __( 'Clone Master first builds a durable inventory, then creates and verifies the archive with workers adapted to your hosting.', 'clone-master' ))
                 )
             ),
-            h('div', { className: 'wpcm-card' },
+            h('div', { className: 'wpcm-card wpcm-export-card' },
                 h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'export' }), __( 'Export your site', 'clone-master' )),
-                h('p', { className: 'wpcm-card-desc' }, __( 'Creates a complete archive of your WordPress installation, ready to migrate or store safely.', 'clone-master' )),
+                h('p', { className: 'wpcm-card-desc' }, __( 'Backup locations from other migration plugins are excluded automatically to avoid nested archives.', 'clone-master' )),
 
                 !running && !done && h('button', { className: 'wpcm-btn wpcm-btn-primary wpcm-btn-lg', onClick: run },
                     h(Ico, { n: 'export', s: 16 }), __( 'Start full export', 'clone-master' )
                 ),
 
                 running && h(Fragment, null,
-                    // Main bar: indeterminate during database work, determinate otherwise
-                    h('div', { className: 'wpcm-progress-wrap' },
-                        h('div', { className: 'wpcm-progress-track' },
-                            h('div', {
-                                className: 'wpcm-progress-fill' + (isDbPhase ? ' indeterminate' : ''),
-                                style: isDbPhase ? {} : { width: Math.min(progress, 100) + '%' }
-                            })
+                    h('div', { className: 'wpcm-export-head' },
+                        h('div', null,
+                            h('span', { className: 'wpcm-export-kicker' }, __( 'Overall progress', 'clone-master' )),
+                            h('h4', { className: 'wpcm-export-title' }, phaseTitles[exportInfo.phase] || phaseTitles.preparing)
                         ),
-                        h('div', { className: 'wpcm-progress-meta' },
-                            h('span', { className: 'wpcm-progress-msg' }, message || ''),
-                            !isDbPhase && h('span', { className: 'wpcm-progress-pct' }, Math.round(progress) + ' %')
-                        )
+                        h('strong', { className: 'wpcm-export-percent' }, Math.round(progress), ' %')
                     ),
-                    // Database detail panel
-                    h(DbPhaseDetail, { dbInfo }),
-                    // Spinner row
-                    !isDbPhase && h('div', { className: 'wpcm-running-row' },
-                        h('span', { className: 'wpcm-spinner' }),
-                        __( 'Processing, please wait…', 'clone-master' )
+                    h('div', { className: 'wpcm-progress-track wpcm-export-global-track', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(progress) },
+                        h('div', { className: 'wpcm-progress-fill', style: { width: Math.min(progress, 100) + '%' } })
+                    ),
+                    h(ExportPhaseRail, { phase: exportInfo.phase }),
+                    h('div', { className: 'wpcm-export-stats' },
+                        h(ExportStat, { label: __( 'Source to archive', 'clone-master' ), value: totalSource > 0 ? formatBytes(totalSource) : __( 'Calculating…', 'clone-master' ), hint: exportInfo.inventoryReady ? __( 'Exact value', 'clone-master' ) : __( 'Inventory in progress', 'clone-master' ) }),
+                        h(ExportStat, { label: __( 'Files', 'clone-master' ), value: exportInfo.inventoryReady ? Number(exportInfo.files).toLocaleString() : Number(exportInfo.files || 0).toLocaleString(), hint: exportInfo.directories > 0 ? Number(exportInfo.directories).toLocaleString() + ' ' + __( 'folders', 'clone-master' ) : '' }),
+                        h(ExportStat, { label: __( 'Current speed', 'clone-master' ), value: exportInfo.speed > 0 ? formatBytes(exportInfo.speed) + '/s' : 'N/A', hint: exportInfo.phase === 'archive' ? __( 'Measured on this server', 'clone-master' ) : __( 'Available during archiving', 'clone-master' ) }),
+                        h(ExportStat, { label: __( 'Estimated time remaining', 'clone-master' ), value: exportInfo.eta > 0 ? formatDuration(exportInfo.eta) : (exportInfo.phase === 'archive' ? __( 'Calculating…', 'clone-master' ) : formatDuration(elapsed)), hint: exportInfo.phase === 'archive' ? __( 'Recalculated continuously', 'clone-master' ) : __( 'Elapsed time', 'clone-master' ) })
+                    ),
+                    exportInfo.excludedCount > 0 && h('div', { className: 'wpcm-export-exclusion-note' },
+                        h(Ico, { n: 'check', s: 14 }),
+                        sprintf(__( '%1$s backup location(s) excluded%2$s.', 'clone-master' ), Number(exportInfo.excludedCount).toLocaleString(), exportInfo.excludedBytes > 0 ? ' (' + formatBytes(exportInfo.excludedBytes) + ')' : '')
+                    ),
+                    h('div', { className: 'wpcm-running-row wpcm-export-running' }, h('span', { className: 'wpcm-spinner' }), message || __( 'Processing, please wait…', 'clone-master' )),
+                    h('details', { className: 'wpcm-export-technical' },
+                        h('summary', null, h(Ico, { n: 'info', s: 13 }), __( 'Technical details', 'clone-master' )),
+                        h('div', { className: 'wpcm-export-technical-body' },
+                            h(DbPhaseDetail, { dbInfo }),
+                            exportInfo.phase === 'archive' && h(Fragment, null,
+                                h('p', null, h('strong', null, __( 'Current file:', 'clone-master' )), ' ', exportInfo.currentFile || 'database.sql'),
+                                exportInfo.currentTotal > 0 && h('p', null, h('strong', null, __( 'Current file progress:', 'clone-master' )), ' ', formatBytes(exportInfo.currentDone), ' / ', formatBytes(exportInfo.currentTotal)),
+                                h('p', null, h('strong', null, __( 'Worker:', 'clone-master' )), ' ', formatBytes(exportInfo.workerBytes), ' · ', Number(exportInfo.workerTime || 0).toFixed(2), ' s'),
+                                exportInfo.memoryPeak > 0 && h('p', null, h('strong', null, __( 'PHP memory:', 'clone-master' )), ' ', formatBytes(exportInfo.memoryPeak), exportInfo.memoryLimit > 0 ? ' / ' + formatBytes(exportInfo.memoryLimit) : '')
+                            ),
+                            exportInfo.phase !== 'archive' && !dbInfo && h('p', null, message || '')
+                        )
                     )
                 ),
 
                 done && h(Fragment, null,
                     h(ProgressBar, { progress: 100, message: __( 'Backup complete.', 'clone-master' ), done: true }),
-                    result && h('div', { className: 'wpcm-alert wpcm-alert-success', style: { marginTop: '16px' } },
+                    result && h('div', { className: 'wpcm-alert wpcm-alert-success wpcm-export-success', style: { marginTop: '16px' } },
                         h(Ico, { n: 'check', s: 16 }),
                         h('div', null,
                             h('strong', null, result.filename), ' (', result.size, ')',
+                            h('p', null, __( 'The download uses a temporary direct server link. A resumable HTTP transfer is used as a fallback.', 'clone-master' )),
                             h('div', { style: { marginTop: '8px' } },
                                 h('a', { href: result.download_url, className: 'wpcm-btn wpcm-btn-success wpcm-btn-sm', style: { textDecoration: 'none' } },
-                                    h(Ico, { n: 'download', s: 13 }), __( 'Download archive', 'clone-master' )
+                                    h(Ico, { n: 'download', s: 13 }), __( 'Accelerated download', 'clone-master' )
                                 )
                             )
                         )
                     ),
-                    h('button', {
-                        className: 'wpcm-btn wpcm-btn-ghost', style: { marginTop: '12px' },
-                        onClick: () => { setDone(false); setProgress(0); setResult(null); setLogs([]); }
-                    }, __( 'New backup', 'clone-master' ))
+                    h('button', { className: 'wpcm-btn wpcm-btn-ghost', style: { marginTop: '12px' }, onClick: () => { setDone(false); setProgress(0); setResult(null); setLogs([]); setExportInfo(previous => ({ ...previous, phase: 'preparing' })); } }, __( 'New backup', 'clone-master' ))
                 ),
 
                 error && h(ErrorNotice, { message: error })
@@ -669,6 +886,7 @@
             h(LogViewer, { entries: logs })
         );
     }
+
 
     /* =========================================================
        IMPORT TAB : shared restore workflow
@@ -708,107 +926,300 @@
             setOperationBusy(true, __( 'Archive upload and validation in progress', 'clone-master' ));
             setPhase('uploading'); setProgress(0); setError(null); setLogs([]);
             try {
-                // Use one immutable chunk size for the entire upload session.
-                // The server authenticates total_chunks in durable state, so changing
-                // boundaries after chunk zero would make retries ambiguous. HTTP 413
-                // can reduce the size only before the first chunk is accepted.
-                const MIN_CHUNK     = 256 * 1024;
-                const SERVER_CAP    = Math.floor((wpcmData.maxUpload || 32 * 1024 * 1024) * 0.85);
-                let chunkSize       = Math.max(MIN_CHUNK, Math.min(4 * 1024 * 1024, SERVER_CAP));
-                let fp = '', sid = '';
+                const KIB = 1024;
+                const MIB = 1024 * KIB;
+                const STEP = 256 * KIB;
+                const HARD_MAX = 64 * MIB;
+                const serverAdvertisedMax = Number(wpcmData.uploadChunkMax || wpcmData.maxUpload || 16 * MIB);
+                const MAX_CHUNK = Math.max(STEP, Math.floor(Math.min(HARD_MAX, serverAdvertisedMax) / STEP) * STEP);
+                const MIN_CHUNK = Math.min(MAX_CHUNK, MAX_CHUNK >= MIB ? MIB : STEP);
+                let chunkSize = Math.max(MIN_CHUNK, Math.min(MAX_CHUNK, Number(wpcmData.uploadChunkInitial || 16 * MIB)));
+                chunkSize = Math.max(STEP, Math.floor(chunkSize / STEP) * STEP);
 
-                const sendChunk = async (blob, index, total, uid) => {
-                    const fd = new FormData();
-                    fd.append('action',       'wpcm_import_upload');
-                    fd.append('nonce',        wpcmData.nonce);
-                    fd.append('backup_chunk', blob, file.name);
-                    fd.append('chunk_index',  String(index));
-                    fd.append('total_chunks', String(total));
-                    fd.append('file_name',    file.name);
-                    if (uid) fd.append('upload_id', uid);
+                const fileSize = file.size;
+                const uploadStartedAt = performance.now();
+                const fingerprint = [file.name, file.size, file.lastModified].join('|');
+                const resumeStorageKey = 'wpcm-offset-upload-v1';
+                let uid = '';
+                let offset = 0;
+                let fp = '';
+                let sid = '';
+                let smoothedBps = 0;
+                let successStreak = 0;
+                let retryCount = 0;
+                let lastUiAt = 0;
 
-                    const started = performance.now();
-                    const requestId = 'upload_' + Date.now().toString(36) + '_' + index.toString(36) + '_' + Math.random().toString(36).slice(2, 10);
-                    fd.append('request_id', requestId);
-                    const uploadUrl = new URL(wpcmData.ajaxUrl, window.location.href);
-                    uploadUrl.searchParams.set('_wpcm_request', requestId);
-                    uploadUrl.searchParams.set('_wpcm_time', Date.now().toString());
-                    const resp = await fetch(uploadUrl.toString(), {
-                        method: 'POST',
-                        body: fd,
-                        cache: 'reload',
-                        credentials: 'same-origin',
-                        headers: {
-                            'Cache-Control': 'no-cache, no-store, max-age=0',
-                            'Pragma': 'no-cache',
-                            'X-WPCM-Request-ID': requestId
-                        }
-                    });
-                    if (resp.status === 413) {
-                        return { tooLarge: true };
+                const alignChunk = value => Math.max(MIN_CHUNK, Math.min(MAX_CHUNK, Math.floor(value / STEP) * STEP));
+                const formatBytes = bytes => {
+                    if (bytes >= 1024 * MIB) return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(bytes / (1024 * MIB)) + ' ' + __( 'GiB', 'clone-master' );
+                    return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(bytes / MIB) + ' ' + __( 'MiB', 'clone-master' );
+                };
+                const formatEta = seconds => {
+                    if (!Number.isFinite(seconds) || seconds < 0) return __( 'Calculating…', 'clone-master' );
+                    if (seconds < 60) return Math.max(1, Math.round(seconds)) + ' s';
+                    const minutes = Math.round(seconds / 60);
+                    if (minutes < 60) return minutes + ' min';
+                    const hours = Math.floor(minutes / 60);
+                    return hours + ' h ' + (minutes % 60) + ' min';
+                };
+                const persistResume = () => {
+                    if (!uid) return;
+                    try {
+                        window.localStorage.setItem(resumeStorageKey, JSON.stringify({
+                            fingerprint,
+                            uploadId: uid,
+                            offset,
+                            chunkSize,
+                            savedAt: Date.now()
+                        }));
+                    } catch (ignored) { /* Upload remains resumable on the server. */ }
+                };
+                const clearResume = () => {
+                    try { window.localStorage.removeItem(resumeStorageKey); } catch (ignored) { /* No-op. */ }
+                };
+                const parseXhrPayload = xhr => {
+                    const text = String(xhr.responseText || '');
+                    if (text === '-1' || text === '0') {
+                        throw makeApiError(__( 'The WordPress security session expired. Reload the page and try again.', 'clone-master' ), { httpStatus: xhr.status });
                     }
-                    return {
-                        data: await parseWpResponse(resp),
-                        elapsed: Math.max(1, performance.now() - started),
-                    };
+                    let json;
+                    try {
+                        json = JSON.parse(text.replace(/^\uFEFF|^[\s\xEF\xBB\xBF]+/, ''));
+                    } catch (error) {
+                        let message = __( 'The upload endpoint returned an invalid response.', 'clone-master' );
+                        if (xhr.status === 413) message = __( 'The server rejected the upload size.', 'clone-master' );
+                        else if (xhr.status >= 500) message = __( 'The server returned an unexpected response.', 'clone-master' );
+                        else if (!text.trim()) message += ' ' + __( 'The response body was empty.', 'clone-master' );
+                        const apiError = makeApiError(message, { httpStatus: xhr.status, details: text.substring(0, 3000) });
+                        apiError.responseData = null;
+                        throw apiError;
+                    }
+                    if (!json || !json.success) {
+                        const data = json && json.data;
+                        const message = (data && typeof data === 'object' ? data.message : data) || __( 'Server error without detail.', 'clone-master' );
+                        const apiError = makeApiError(message, {
+                            eventId: data && typeof data === 'object' ? (data.event_id || '') : '',
+                            httpStatus: xhr.status
+                        });
+                        apiError.responseData = data && typeof data === 'object' ? data : null;
+                        throw apiError;
+                    }
+                    return json.data || {};
+                };
+                const uploadRequest = (blob, requestOffset, uploadId, onProgress, statusOnly = false) => new Promise((resolve, reject) => {
+                    const requestId = 'upload_' + Date.now().toString(36) + '_' + requestOffset.toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+                    const url = new URL(wpcmData.ajaxUrl, window.location.href);
+                    url.searchParams.set('action', 'wpcm_import_upload');
+                    url.searchParams.set('upload_protocol', 'offset-v1');
+                    url.searchParams.set('_wpcm_request', requestId);
+                    url.searchParams.set('_wpcm_time', Date.now().toString());
+
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', url.toString(), true);
+                    xhr.timeout = statusOnly ? 30000 : Math.max(180000, Math.min(900000, Math.ceil((blob.size / Math.max(smoothedBps || 128 * KIB, 128 * KIB)) * 4000)));
+                    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+                    xhr.setRequestHeader('Cache-Control', 'no-cache, no-store, max-age=0');
+                    xhr.setRequestHeader('Pragma', 'no-cache');
+                    xhr.setRequestHeader('X-WPCM-Nonce', wpcmData.nonce);
+                    xhr.setRequestHeader('X-WPCM-Request-ID', requestId);
+                    xhr.setRequestHeader('X-WPCM-Upload-ID', uploadId || '');
+                    if (statusOnly) {
+                        xhr.setRequestHeader('X-WPCM-Upload-Status', '1');
+                    } else {
+                        xhr.setRequestHeader('X-WPCM-File-Name', encodeURIComponent(file.name));
+                        xhr.setRequestHeader('X-WPCM-File-Size', String(fileSize));
+                        xhr.setRequestHeader('X-WPCM-Upload-Offset', String(requestOffset));
+                    }
+                    if (!statusOnly && typeof onProgress === 'function') {
+                        xhr.upload.addEventListener('progress', event => {
+                            if (event.lengthComputable) onProgress(event.loaded, event.total);
+                        });
+                    }
+                    xhr.addEventListener('load', () => {
+                        try { resolve(parseXhrPayload(xhr)); } catch (error) { reject(error); }
+                    });
+                    xhr.addEventListener('error', () => reject(makeApiError(__( 'Network error: ', 'clone-master' ) + __( 'The upload connection was interrupted.', 'clone-master' ), { httpStatus: 0 })));
+                    xhr.addEventListener('timeout', () => reject(makeApiError(__( 'Timeout: the server may still be processing.', 'clone-master' ), { httpStatus: 0 })));
+                    xhr.addEventListener('abort', () => reject(makeApiError(__( 'The upload was interrupted.', 'clone-master' ), { httpStatus: 0 })));
+                    xhr.send(statusOnly ? null : blob);
+                });
+                const queryStatus = async uploadId => uploadRequest(new Blob([]), 0, uploadId, null, true);
+                const updateUi = (sent, currentChunkLoaded = 0) => {
+                    const now = performance.now();
+                    if (now - lastUiAt < 100 && sent + currentChunkLoaded < fileSize) return;
+                    lastUiAt = now;
+                    const transferred = Math.min(fileSize, sent + currentChunkLoaded);
+                    const elapsedSeconds = Math.max(0.001, (now - uploadStartedAt) / 1000);
+                    const averageBps = transferred / elapsedSeconds;
+                    const bps = smoothedBps > 0 ? (smoothedBps * 0.65 + averageBps * 0.35) : averageBps;
+                    const pct = fileSize > 0 ? (transferred / fileSize) * 100 : 0;
+                    const eta = bps > 0 ? (fileSize - transferred) / bps : Infinity;
+                    const speedMbps = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(bps * 8 / 1000000);
+                    setProgress(Math.max(0, Math.min(35, pct * 0.35)));
+                    setMessage(sprintf(
+                        __( '%1$s / %2$s · %3$s Mbit/s · about %4$s remaining', 'clone-master' ),
+                        formatBytes(transferred), formatBytes(fileSize), speedMbps, formatEta(eta)
+                    ));
+                };
+                const adaptChunkSize = (current, bytes, elapsedMs, measuredBps, serverLimit) => {
+                    const cap = Math.max(STEP, Math.min(MAX_CHUNK, Number(serverLimit || MAX_CHUNK)));
+                    const targetMs = 5500;
+                    const ideal = measuredBps * (targetMs / 1000);
+                    let next = current * 0.65 + ideal * 0.35;
+                    if (elapsedMs < 1800 && successStreak >= 2) next = Math.max(next, current * 1.5);
+                    if (elapsedMs > 12000) next = Math.min(next, current * 0.70);
+                    next = Math.min(next, current * 1.6, cap);
+                    next = Math.max(next, current * 0.5, MIN_CHUNK);
+                    return Math.max(STEP, Math.floor(next / STEP) * STEP);
                 };
 
-                if (file.size > chunkSize) {
-                    let uid = '';
-                    let offset = 0;
-                    let chunkIndex = 0;
-                    let totalSent = 0;
-                    const fileSize = file.size;
-                    let totalChunks = Math.ceil(fileSize / chunkSize);
-
-                    log( __( 'Chunked upload of ', 'clone-master' ) + (fileSize / 1048576).toFixed(1) + ' MB : chunk size: ' + Math.round(chunkSize / 1024) + ' KB');
-
-                    while (offset < fileSize) {
-                        const blob = file.slice(offset, Math.min(offset + chunkSize, fileSize));
-                        const result = await sendChunk(blob, chunkIndex, totalChunks, uid);
-
-                        if (result.tooLarge) {
-                            if (uid || chunkIndex > 0 || chunkSize <= MIN_CHUNK) {
-                                throw new Error(__( 'The server rejected a chunk after the upload session started. Restart the upload after increasing the server upload limit.', 'clone-master' ));
+                try {
+                    const saved = JSON.parse(window.localStorage.getItem(resumeStorageKey) || 'null');
+                    if (saved && saved.fingerprint === fingerprint && saved.uploadId) {
+                        const status = await queryStatus(String(saved.uploadId));
+                        if (Number(status.total_size) === fileSize) {
+                            uid = String(status.upload_id || saved.uploadId);
+                            offset = Math.max(0, Math.min(fileSize, Number(status.expected_offset || 0)));
+                            chunkSize = alignChunk(Number(saved.chunkSize || chunkSize));
+                            if (status.complete) {
+                                fp = status.file_path;
+                                sid = status.session_id;
+                            } else if (offset > 0) {
+                                log(__( 'Resuming the upload from ', 'clone-master' ) + formatBytes(offset) + '.', 'success');
                             }
-                            chunkSize = Math.max(MIN_CHUNK, Math.floor(chunkSize / 2));
-                            totalChunks = Math.ceil(fileSize / chunkSize);
-                            log(__( 'HTTP 413 : initial chunk reduced to ', 'clone-master' ) + Math.round(chunkSize / 1024) + ' KB', 'warn');
-                            continue;
-                        }
-
-                        const r = result.data;
-                        uid = r.upload_id || uid;
-                        offset += blob.size;
-                        totalSent += blob.size;
-                        chunkIndex++;
-
-                        const pct = Math.round((totalSent / fileSize) * 10);
-                        const sentMiB = (totalSent / 1048576).toFixed(1);
-                        const totalMiB = (fileSize / 1048576).toFixed(1);
-                        const speedMbps = ((blob.size / result.elapsed) * 8 / 1000).toFixed(1);
-                        setProgress(pct);
-                        setMessage(sentMiB + ' / ' + totalMiB + ' MB sent : ' + speedMbps + ' Mbps');
-
-                        if (r.complete) {
-                            fp = r.file_path;
-                            sid = r.session_id;
-                            log(r.message || __( 'Upload complete', 'clone-master' ), 'success');
                         }
                     }
-                } else {
-                    log( __( 'Sending archive directly (', 'clone-master' ) + (file.size / 1048576).toFixed(1) + ' MB)…');
-                    const r = await api('wpcm_import_upload', { backup_file: file });
-                    fp = r.file_path; sid = r.session_id;
-                    log(__( 'Archive received successfully.', 'clone-master' ), 'success');
+                } catch (ignored) {
+                    clearResume();
                 }
-                setProgress(10);
-                log( __( 'Analysing archive…', 'clone-master' ));
-                const ext = await apiRetry('wpcm_import', { step: 'extract', session_id: sid, file_path: fp, new_url: newUrl }, MAX_RETRIES, log);
+
+                if (!fp && !uid) {
+                    if (!window.crypto || typeof window.crypto.getRandomValues !== 'function') {
+                        throw new Error(__( 'This browser cannot create a secure resumable upload identifier.', 'clone-master' ));
+                    }
+                    const randomBytes = new Uint8Array(16);
+                    window.crypto.getRandomValues(randomBytes);
+                    uid = 'upload_' + Array.from(randomBytes, value => value.toString(16).padStart(2, '0')).join('');
+                    persistResume();
+                }
+
+                if (!fp) {
+                    log(
+                        __( 'Adaptive resumable upload: starting at ', 'clone-master' ) +
+                        Math.round(chunkSize / MIB) + ' ' + __( 'MiB', 'clone-master' ) + ' · ' +
+                        __( 'automatic range ', 'clone-master' ) +
+                        Math.max(1, Math.round(MIN_CHUNK / MIB)) + '–' + Math.round(MAX_CHUNK / MIB) + ' ' + __( 'MiB', 'clone-master' ) + '.'
+                    );
+                    updateUi(offset, 0);
+
+                    while (offset < fileSize) {
+                        const requestSize = Math.min(chunkSize, fileSize - offset);
+                        const blob = file.slice(offset, offset + requestSize);
+                        const requestStarted = performance.now();
+                        try {
+                            const result = await uploadRequest(blob, offset, uid, loaded => updateUi(offset, loaded));
+                            const elapsed = Math.max(1, performance.now() - requestStarted);
+                            const acknowledgedOffset = Number(result.expected_offset);
+                            if (!Number.isFinite(acknowledgedOffset) || acknowledgedOffset < offset || acknowledgedOffset > fileSize) {
+                                throw makeApiError(__( 'The server returned an invalid resumable upload offset.', 'clone-master' ), { httpStatus: 409 });
+                            }
+                            uid = String(result.upload_id || uid);
+                            const acceptedBytes = acknowledgedOffset - offset;
+                            if (acceptedBytes < 1 && !result.complete) {
+                                throw makeApiError(__( 'The server did not advance the resumable upload offset.', 'clone-master' ), { httpStatus: 409 });
+                            }
+                            offset = acknowledgedOffset;
+                            const measuredBps = acceptedBytes / (elapsed / 1000);
+                            smoothedBps = smoothedBps > 0 ? (smoothedBps * 0.70 + measuredBps * 0.30) : measuredBps;
+                            successStreak++;
+                            retryCount = 0;
+                            const previousChunk = chunkSize;
+                            chunkSize = adaptChunkSize(chunkSize, acceptedBytes, elapsed, smoothedBps, result.chunk_limit);
+                            persistResume();
+                            updateUi(offset, 0);
+                            if (Math.abs(chunkSize - previousChunk) >= MIB) {
+                                log(
+                                    __( 'Adaptive chunk adjusted to ', 'clone-master' ) + Math.round(chunkSize / MIB) + ' ' + __( 'MiB', 'clone-master' ) + ' · ' +
+                                    new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(elapsed / 1000) + ' s · ' +
+                                    new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(measuredBps * 8 / 1000000) + ' Mbit/s'
+                                );
+                            }
+                            if (result.complete) {
+                                fp = result.file_path;
+                                sid = result.session_id;
+                                log(result.message || __( 'Upload complete', 'clone-master' ), 'success');
+                                break;
+                            }
+                        } catch (error) {
+                            retryCount++;
+                            successStreak = 0;
+                            const httpStatus = Number(error.httpStatus || 0);
+                            const responseData = error.responseData || {};
+                            if (httpStatus === 413) {
+                                const oldSize = chunkSize;
+                                chunkSize = alignChunk(Math.max(MIN_CHUNK, chunkSize / 2));
+                                if (chunkSize >= oldSize && oldSize <= MIN_CHUNK) throw error;
+                                log(__( 'HTTP 413: adaptive chunk reduced to ', 'clone-master' ) + Math.max(1, Math.round(chunkSize / MIB)) + ' ' + __( 'MiB', 'clone-master' ) + '.', 'warn');
+                                continue;
+                            }
+                            if (httpStatus === 409 && Number.isFinite(Number(responseData.expected_offset))) {
+                                offset = Math.max(0, Math.min(fileSize, Number(responseData.expected_offset)));
+                                uid = String(responseData.upload_id || uid);
+                                persistResume();
+                                log(__( 'Upload position resynchronized with the server.', 'clone-master' ), 'warn');
+                                continue;
+                            }
+
+                            if (uid && retryCount <= 5) {
+                                try {
+                                    const status = await queryStatus(uid);
+                                    const serverOffset = Math.max(0, Math.min(fileSize, Number(status.expected_offset || 0)));
+                                    if (serverOffset > offset) {
+                                        offset = serverOffset;
+                                        retryCount = 0;
+                                        persistResume();
+                                        updateUi(offset, 0);
+                                        log(__( 'The server had already received the interrupted part. Upload resumed without resending it.', 'clone-master' ), 'success');
+                                        if (status.complete) {
+                                            fp = status.file_path;
+                                            sid = status.session_id;
+                                            break;
+                                        }
+                                        continue;
+                                    }
+                                } catch (statusError) { /* Retry the same offset below. */ }
+                                chunkSize = alignChunk(Math.max(MIN_CHUNK, chunkSize * 0.65));
+                                const delay = Math.min(8000, 500 * Math.pow(2, retryCount - 1)) + Math.floor(Math.random() * 250);
+                                log(__( 'Temporary upload interruption. Retrying from the confirmed offset with ', 'clone-master' ) + Math.max(1, Math.round(chunkSize / MIB)) + ' ' + __( 'MiB', 'clone-master' ) + '.', 'warn');
+                                await new Promise(resolve => window.setTimeout(resolve, delay));
+                                continue;
+                            }
+                            throw error;
+                        }
+                    }
+                }
+
+                if (!fp || !sid) throw new Error(__( 'The upload finished without a validated server file path.', 'clone-master' ));
+                setProgress(35);
+                setMessage(sprintf(
+                    __( 'Upload complete: %s received. Building the archive index…', 'clone-master' ),
+                    formatBinaryBytes(fileSize, true)
+                ));
+                log(__( 'Building the archive structural index…', 'clone-master' ));
+                const ext = await validateArchiveAdaptively(
+                    { file_path: fp, new_url: newUrl },
+                    log,
+                    current => {
+                        setSessionId(current.session_id || '');
+                        setFilePath(fp);
+                        setProgress(35 + Math.max(0, Math.min(100, Number(current.progress || 0))) * 0.65);
+                        setMessage(current.message || '');
+                        if (current.manifest) setManifest(current.manifest);
+                    }
+                );
                 setSessionId(ext.session_id); setFilePath(fp);
-                setProgress(ext.progress); setMessage(ext.message);
                 if (ext.manifest) setManifest(ext.manifest);
-                log(ext.message, 'success');
+                clearResume();
                 setPhase('opts');
             } catch (e) { setError(e.message); log( __( 'Error: ', 'clone-master' ) + e.message, 'error'); setPhase('error'); }
             finally { setOperationBusy(false); }
@@ -843,6 +1254,7 @@
                 let step = 'database';
                 let dbIdx = 0, dbOff = 0, dbQ = 0, dbE = 0;
                 let srIdx = 0, srOff = 0, srR = 0, srC = 0, srS = 0;
+                const restoreLogTracker = createRestoreLogTracker();
 
                 while (step) {
                     const fd = new FormData();
@@ -852,7 +1264,7 @@
 
                     const d = await installerApi(url, fd, step);
                     setProgress(d.progress || 0); setMessage(d.message || '');
-                    log(d.message || step + ' ' + __( 'complete', 'clone-master' ), 'success');
+                    logRestoreUpdate(restoreLogTracker, step, d, log);
                     if (d.errors_log) d.errors_log.forEach(e => log('SQL: ' + e, 'warn'));
 
                     if (step === 'database') { dbIdx = d.file_index ?? dbIdx; dbOff = d.byte_offset ?? 0; dbQ = d.queries ?? dbQ; dbE = d.errors ?? dbE; }
@@ -880,7 +1292,7 @@
                     ),
                     h('div', { className: 'wpcm-card' },
                         h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'import' }), __( 'Select an archive', 'clone-master' )),
-                        h('p', { className: 'wpcm-card-desc' }, __( 'Drop your .wpcm file or click to select it. Large files are sent in parts to work around server limits.', 'clone-master' )),
+                        h('p', { className: 'wpcm-card-desc' }, __( 'Drop your .wpcm file or click to select it. Large files use a resumable adaptive transfer that adjusts automatically to the server.', 'clone-master' )),
                         h('div', {
                             className: 'wpcm-upload-zone' + (dragOver ? ' dragover' : '') + (file ? ' has-file' : ''),
                             onClick: () => fileRef.current && fileRef.current.click(),
@@ -890,7 +1302,7 @@
                         },
                             h('input', { type: 'file', ref: fileRef, accept: '.wpcm', style: { display: 'none' }, onChange: e => setFile(e.target.files[0]) }),
                             h('div', { className: 'wpcm-upload-ico' }, h(Ico, { n: 'upload', s: 22 })),
-                            h('p', { className: 'wpcm-upload-name' }, file ? file.name + ' : ' + (file.size / 1048576).toFixed(1) + ' MB' : __( 'Drop your archive here', 'clone-master' )),
+                            h('p', { className: 'wpcm-upload-name' }, file ? file.name + ' : ' + formatBinaryBytes(file.size, true) : __( 'Drop your archive here', 'clone-master' )),
                             h('p', { className: 'wpcm-upload-hint' }, file ? __( 'Click to choose a different file', 'clone-master' ) : __( 'Accepted format: .wpcm : or click to browse', 'clone-master' ))
                         ),
                         file && h(Fragment, null,
@@ -917,7 +1329,7 @@
                     h(ProgressBar, { progress, message }),
                     h('div', { className: 'wpcm-running-row' },
                         h('span', { className: 'wpcm-spinner' }),
-                        __( 'Uploading : please do not close this page.', 'clone-master' )
+                        __( 'You may change tabs. Keep this page open; interrupted uploads can resume after selecting the same archive.', 'clone-master' )
                     )
                 );
 
@@ -1234,12 +1646,19 @@
         useEffect(() => {
             (async () => {
                 try {
-                    log( __( 'Analysing backup…', 'clone-master' ));
-                    const ext = await apiRetry('wpcm_import', { step: 'extract', session_id: '', backup_name: _backupName, new_url: newUrl }, MAX_RETRIES, log);
+                    log( __( 'Building the backup structural index…', 'clone-master' ));
+                    const ext = await validateArchiveAdaptively(
+                        { backup_name: _backupName, new_url: newUrl },
+                        log,
+                        current => {
+                            setSessionId(current.session_id || '');
+                            setProgress(Math.max(0, Math.min(100, Number(current.progress || 0))));
+                            setMessage(current.message || '');
+                            if (current.manifest) setManifest(current.manifest);
+                        }
+                    );
                     setSessionId(ext.session_id);
-                    setProgress(ext.progress); setMessage(ext.message);
                     if (ext.manifest) setManifest(ext.manifest);
-                    log(ext.message, 'success');
                     setPhase('opts');
                 } catch (e) { setError(e.message); log( __( 'Error: ', 'clone-master' ) + e.message, 'error'); setPhase('error'); }
             })();
@@ -1267,6 +1686,7 @@
                 let step = 'database';
                 let dbIdx = 0, dbOff = 0, dbQ = 0, dbE = 0;
                 let srIdx = 0, srOff = 0, srR = 0, srC = 0, srS = 0;
+                const restoreLogTracker = createRestoreLogTracker();
 
                 while (step) {
                     const fd = new FormData();
@@ -1276,7 +1696,7 @@
 
                     const d = await installerApi(url, fd, step);
                     setProgress(d.progress || 0); setMessage(d.message || '');
-                    log(d.message || step + ' ' + __( 'complete', 'clone-master' ), 'success');
+                    logRestoreUpdate(restoreLogTracker, step, d, log);
                     if (d.errors_log) d.errors_log.forEach(e => log('SQL: ' + e, 'warn'));
                     if (step === 'database') { dbIdx = d.file_index ?? dbIdx; dbOff = d.byte_offset ?? 0; dbQ = d.queries ?? dbQ; dbE = d.errors ?? dbE; }
                     if (step === 'replace_urls') { srIdx = d.table_index ?? srIdx; srOff = d.row_offset ?? 0; srR = d.rows ?? srR; srC = d.cells ?? srC; srS = d.serial ?? srS; }
@@ -1292,7 +1712,7 @@
                 case 'analyzing': return h('div', { className: 'wpcm-card' },
                     h('h3', { className: 'wpcm-card-title' }, h(Ico, { n: 'db' }), __( 'Reading backup…', 'clone-master' )),
                     h(ProgressBar, { progress, message }),
-                    h('div', { className: 'wpcm-running-row' }, h('span', { className: 'wpcm-spinner' }), __( 'Analysing archive…', 'clone-master' ))
+                    h('div', { className: 'wpcm-running-row' }, h('span', { className: 'wpcm-spinner' }), message || __( 'Adaptive archive validation in progress…', 'clone-master' ))
                 );
 
                 case 'opts': return h('div', { className: 'wpcm-card' },
@@ -1570,7 +1990,7 @@
                 h('div', { className: 'wpcm-header-text' },
                     h('div', { className: 'wpcm-title-row' },
                         h('h1', null, 'Clone Master'),
-                        h('span', { className: 'wpcm-version-badge' }, 'v' + (wpcmData.version || '3.1.6'))
+                        h('span', { className: 'wpcm-version-badge' }, 'v' + (wpcmData.version || '3.2.2'))
                     ),
                     h('p', null, __( 'Reliable WPCM backups, staged restore and production diagnostics', 'clone-master' ))
                 ),

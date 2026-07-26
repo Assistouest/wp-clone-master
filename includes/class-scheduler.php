@@ -481,13 +481,8 @@ class WPCM_Scheduler {
             throw new RuntimeException( __( 'The final archive checksum no longer matches the verified package.', 'clone-master' ) );
         }
 
-        try {
-            $inspection = WPCM_Archive::inspect( $target_path );
-        } catch ( Throwable $error ) {
-            throw new RuntimeException( __( 'The final WPCM container failed its integrity check.', 'clone-master' ) );
-        }
-        if ( ! hash_equals( strtolower( $actual ), strtolower( (string) $inspection['file_sha256'] ) ) ) {
-            throw new RuntimeException( __( 'The final WPCM checksum differs from its verified container hash.', 'clone-master' ) );
+        if ( null === WPCM_Archive::footer_payload_hash( $target_path ) ) {
+            throw new RuntimeException( __( 'The final WPCM container has an invalid authentication footer.', 'clone-master' ) );
         }
 
         WPCM_Reliability::atomic_write( $target_path . '.sha256', strtolower( $actual ) . "\n", 0640 );

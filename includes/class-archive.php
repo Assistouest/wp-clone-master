@@ -85,12 +85,12 @@ final class WPCM_Archive {
         );
     }
 
-    public static function append_chunk( $handle, $raw ) {
+    public static function append_chunk( $handle, $raw, $allow_compression = true ) {
         $raw_length = strlen( $raw );
         if ( $raw_length < 1 || $raw_length > self::CHUNK_BYTES ) {
             throw new RuntimeException( 'Invalid WPCM block size.' );
         }
-        $compressed      = function_exists( 'gzdeflate' ) ? gzdeflate( $raw, 1 ) : false;
+        $compressed      = $allow_compression && function_exists( 'gzdeflate' ) ? gzdeflate( $raw, 1 ) : false;
         $use_compression = is_string( $compressed ) && strlen( $compressed ) + 64 < $raw_length;
         $payload         = $use_compression ? $compressed : $raw;
         $record          = 'CHNK'
@@ -144,6 +144,39 @@ final class WPCM_Archive {
             fclose( $handle );
         }
         return $hash;
+    }
+
+
+    /**
+     * Read the authenticated payload hash stored in a finalized footer without
+     * decompressing the complete archive. This is intentionally a lightweight
+     * state check; full structural validation remains available through inspect().
+     *
+     * @param string $path Container path.
+     * @return string|null Lowercase SHA-256 payload hash, or null when unfinished.
+     */
+    public static function footer_payload_hash( $path ) {
+        $size = @filesize( $path );
+        if ( false === $size || $size < strlen( self::MAGIC ) + self::FOOTER_BYTES ) {
+            return null;
+        }
+        $handle = @fopen( $path, 'rb' );
+        if ( ! is_resource( $handle ) ) {
+            return null;
+        }
+        try {
+            if ( 0 !== @fseek( $handle, $size - self::FOOTER_BYTES ) ) {
+                return null;
+            }
+            $footer = fread( $handle, self::FOOTER_BYTES );
+        } finally {
+            fclose( $handle );
+        }
+        if ( ! is_string( $footer ) || strlen( $footer ) !== self::FOOTER_BYTES || self::FOOTER_MAGIC !== substr( $footer, 0, 4 ) ) {
+            return null;
+        }
+        $hash = substr( $footer, 4 );
+        return preg_match( '/^[a-f0-9]{64}$/', $hash ) ? $hash : null;
     }
 
     /**
@@ -373,14 +406,18 @@ final class WPCM_Archive {
                 throw new RuntimeException( 'The WPCM database checksum is invalid.' );
             }
 
+            $file_hash = hash_file( 'sha256', $path );
+            if ( ! is_string( $file_hash ) || ! preg_match( '/^[a-f0-9]{64}$/', $file_hash ) ) {
+                throw new RuntimeException( 'Unable to calculate the WPCM file checksum.' );
+            }
             return array(
                 'manifest'           => $manifest,
                 'files_count'        => $files_count,
                 'files_size'         => $files_size,
                 'uncompressed_bytes' => $uncompressed,
                 'sha256'             => $expected_hash,
-                'file_sha256'        => hash_file( 'sha256', $path ),
-                'archive_sha256'     => hash_file( 'sha256', $path ),
+                'file_sha256'        => $file_hash,
+                'archive_sha256'     => $file_hash,
             );
         } catch ( Throwable $error ) {
             foreach ( array_keys( $partials ) as $partial_path ) {

@@ -4,7 +4,7 @@ Tags: backup, migration, clone, restore, nextcloud
 Requires at least: 5.6
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 3.1.6
+Stable tag: 3.2.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -26,7 +26,7 @@ The `WPCMARCHIVE2` container is append-only. Each bounded block carries its own 
 * Fixed upper key boundaries, row-count validation, and normalized schema hashes.
 * Grouped SQL inserts and exact WordPress percent-placeholder restoration.
 * Block-by-block WPCM validation and atomic extraction.
-* Independent, locked, SHA-256-verified browser upload parts.
+* Offset-based, resumable browser uploads with adaptive request sizes and direct durable append.
 * Database import under a temporary prefix before destination tables are changed.
 * One atomic MySQL `RENAME TABLE` statement for the live database switch.
 * Same-filesystem staged file promotion with a signed write-ahead rollback journal.
@@ -42,6 +42,8 @@ Automated tests preserve `/%postname%/`, `%%title%%`, `58%`, URLs containing `%2
 = Backup contents =
 
 The WPCM container contains exactly one `database.sql` entry and zero or more regular files below `wp-content/`. The plugin can include WordPress-prefixed base tables, themes, plugins, uploads, must-use plugins, and WordPress language files.
+
+Clone Master excludes its own runtime data and recognized local backup stores from other migration plugins. This prevents recursive archives such as `.wpress`, `.wpstg`, Duplicator packages, UpdraftPlus sets, WPvivid backups, BackWPup folders, and BackupBuddy archives from being embedded inside a new WPCM backup. Ordinary media archives remain included unless their path or filename clearly identifies them as a backup.
 
 For safety, Clone Master does not automatically restore `.htaccess`, `.user.ini`, `php.ini`, or `wp-config.php`, and it does not disable unrelated security plugins.
 
@@ -65,7 +67,7 @@ No analytics or telemetry is sent to the plugin author.
 
 = Database limitations =
 
-A non-empty table must have a primary key or another `UNIQUE NOT NULL` key. Keys may contain one or more columns. WordPress-prefixed views and triggers are rejected because dependency-aware transactional restore is not implemented for those objects.
+Tables with a primary key or another `UNIQUE NOT NULL` key use resumable keyset cursors. Non-empty tables without such a key are exported through a private helper snapshot with a synthetic cursor key, with a memory-gated atomic fallback when helper-table privileges are unavailable. WordPress-prefixed views and triggers are rejected because dependency-aware transactional restore is not implemented for those objects.
 
 A sliced live backup cannot be one database transaction across multiple HTTP requests. Clone Master freezes high-water keys and validates schema and row-count drift, but a maintenance window remains recommended for highly active transactional sites.
 
@@ -111,6 +113,52 @@ In `wp-content/wpcm-backups/`. Published `.wpcm` backups are preserved during pl
 Clone Master contains no analytics, advertising, telemetry, or tracking. Outbound requests occur only when an administrator explicitly configures Nextcloud, and they target that configured server.
 
 == Changelog ==
+
+= 3.2.2 =
+* Added a fast structural WPCM index followed by adaptive, resumable block validation and extraction.
+* Preserved the active SHA-256 state between requests on PHP 8+ to avoid rereading multi-gigabyte archives.
+* Added exact binary sizes with the exact byte count instead of rounded upload completion messages.
+* Made database staging and serialized URL replacement workers adapt to observed wall time and PHP memory.
+* Replaced table-count-only progress with byte-based database progress and row-based URL replacement progress.
+* Removed the redundant full wp-content inventory walk after cryptographic archive validation.
+* Reduced activity-log noise while keeping phase, milestone and adaptive-worker changes visible.
+
+= 3.2.1 =
+* Upload: Replace fixed 4 MiB multipart chunks with an offset-based resumable raw-body protocol.
+* Performance: Start near 16 MiB and adapt between 1 and 64 MiB using measured throughput and request duration while respecting PHP and proxy limits.
+* Performance: Append directly to one protected partial archive instead of storing and reassembling hundreds of part files.
+* Reliability: Persist the confirmed byte offset, resynchronize after lost responses, retry transient failures with backoff, and resume after the same archive is selected again.
+* UX: Show exact upload percentage, smoothed throughput, transferred bytes, and estimated time remaining, including progress inside the active request.
+* Validation: Defer the full block-by-block archive scan to the extraction stage instead of validating the multi-gigabyte container twice.
+
+= 3.2.0 =
+* Performance: Archive workers keep source files open across multiple blocks and adapt their byte budget to measured throughput, time, and PHP memory.
+* Performance: Already-compressed media and archive formats bypass redundant DEFLATE attempts.
+* Inventory: A durable pre-archive inventory provides exact file counts and source bytes before archive creation begins.
+* UX: The export screen now presents one global progress view with phases, exact source volume, throughput, ETA, exclusions, and optional technical details.
+* Download: Large archives use short-lived random direct-delivery links so LiteSpeed, Apache, or Nginx can serve bytes without a long PHP response.
+* Download: LiteSpeed uses X-LiteSpeed-Location when available; the portable PHP fallback supports HTTP byte ranges and resumable transfers.
+* Reliability: Normal publication avoids repeated full decompression passes while retaining per-block SHA-256 validation, footer authentication, final file checksum, and atomic rename.
+
+= 3.1.9 =
+* Database batches now start at 2,000 rows and adapt up to 50,000 rows on capable servers.
+* Adaptive sizing uses wall-clock time, absolute PHP peak memory, generated SQL bytes, and observed row size.
+* Batch growth requires two healthy full requests; safety reductions apply immediately.
+* Individual INSERT statements are byte-bounded against MySQL max_allowed_packet for more portable restores.
+* Export memory is raised through the scoped WordPress API without lowering larger host limits.
+
+= 3.1.8 =
+* Fix: Exclude All-in-One WP Migration temporary storage, including vendor and development folder variants such as `all-in-one-wp-migration-unlimited-main/storage`.
+* Safety: Exclude recognized local backup stores used by Duplicator, UpdraftPlus, WPvivid, WP STAGING, BackWPup, BackupBuddy, Total Upkeep, and other clearly named backup directories.
+* Progress: Count bytes already read from the current file so multi-gigabyte files no longer leave the interface apparently frozen.
+* UX: Show the current file size, completed bytes, file percentage, overall archive bytes, and the most recently excluded backup location.
+* Logging: Replace the active scan and archive journal row instead of appending hundreds of duplicate progress messages.
+
+= 3.1.7 =
+* Fix: Export tables without a PRIMARY or UNIQUE NOT NULL key through a private durable snapshot with a synthetic cursor key.
+* Reliability: Preserve duplicate rows exactly without using unsafe LIMIT/OFFSET pagination on the source table.
+* Fallback: Use a memory-gated single-statement atomic read when the database account cannot create the helper snapshot.
+* Cleanup: Remove completed helper snapshots and purge marked snapshots abandoned for more than seven days.
 
 = 3.1.6 =
 * Fix: Follow WP-CLI search-replace semantics by treating a value as serialized only after the complete payload passes strict parsing.
