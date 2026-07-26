@@ -426,6 +426,28 @@ final class WPCM_Reliability {
     }
 
     /**
+     * Validate one local WPCM archive filename without applying WordPress
+     * filename filters. Export filenames are generated internally as portable
+     * ASCII strings, so filter-dependent sanitization must not change the name
+     * between resumable HTTP requests.
+     *
+     * @param mixed $filename Candidate basename.
+     * @return bool
+     */
+    public static function is_safe_archive_filename( $filename ) {
+        if ( ! is_string( $filename ) || '' === $filename || strlen( $filename ) > 240 ) {
+            return false;
+        }
+        if ( false !== strpos( $filename, "\0" ) || basename( $filename ) !== $filename ) {
+            return false;
+        }
+        if ( false !== strpos( $filename, '..' ) ) {
+            return false;
+        }
+        return 1 === preg_match( '/\A[a-zA-Z0-9][a-zA-Z0-9._-]*\.wpcm\z/D', $filename );
+    }
+
+    /**
      * Derive the encryption key used by the automatic recovery envelope.
      *
      * @return string Binary AES key.

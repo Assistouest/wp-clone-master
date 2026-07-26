@@ -2143,6 +2143,178 @@ class WPCM_Exporter {
         return ! in_array( $extension, $packed, true );
     }
 
+    /**
+     * Resolve one scanner entry into a stable source for the append-only writer.
+     *
+     * Files that still match the durable scan plan are streamed directly. When
+     * a live site changes a file between scanning and archiving, a verified
+     * private snapshot is created inside the export session instead of aborting
+     * the entire backup. Missing, unreadable and symbolic-link sources remain
+     * hard failures.
+     *
+     * @param array  $entry     Durable scanner entry.
+     * @param string $relative  Portable relative path.
+     * @param string $entry_key Stable queue and entry identifier.
+     * @param array  $state     Mutable archive state.
+     * @return array{source:string,size:int,source_mtime:int,archive_mtime:int,is_snapshot:bool}
+     */
+    private function prepare_archive_source( array $entry, $relative, $entry_key, array &$state ) {
+        $source = (string) ( $entry['path'] ?? '' );
+        if ( '' === $source || ! is_file( $source ) || is_link( $source ) || ! is_readable( $source ) ) {
+            throw new Exception( sprintf( __( 'A backup source is missing, unreadable, or no longer a regular file: %s', 'clone-master' ), $source ) );
+        }
+
+        clearstatcache( true, $source );
+        $size          = @filesize( $source );
+        $mtime         = @filemtime( $source );
+        $planned_size  = (int) ( $entry['size'] ?? -1 );
+        $planned_mtime = (int) ( $entry['mtime'] ?? -1 );
+        $forced        = ! empty( $state['force_snapshot'][ $entry_key ] );
+
+        if ( false === $size || false === $mtime ) {
+            throw new Exception( sprintf( __( 'Unable to inspect backup source file: %s', 'clone-master' ), $source ) );
+        }
+
+        if ( ! $forced && (int) $size === $planned_size && (int) $mtime === $planned_mtime ) {
+            return array(
+                'source'        => $source,
+                'size'          => $planned_size,
+                'source_mtime'  => $planned_mtime,
+                'archive_mtime' => $planned_mtime,
+                'is_snapshot'   => false,
+            );
+        }
+
+        $snapshot = $this->create_stable_source_snapshot( $source, $relative );
+        unset( $state['force_snapshot'][ $entry_key ] );
+
+        $previous_size = isset( $state['resolved_entry_sizes'][ $entry_key ] )
+            ? (int) $state['resolved_entry_sizes'][ $entry_key ]
+            : $planned_size;
+        $delta = (int) $snapshot['size'] - $previous_size;
+        if ( 0 !== $delta ) {
+            $state['total_bytes']        = max( 0, (int) $state['total_bytes'] + $delta );
+            $state['source_bytes_total'] = max( 0, (int) $state['source_bytes_total'] + $delta );
+        }
+        $state['resolved_entry_sizes'][ $entry_key ] = (int) $snapshot['size'];
+
+        if ( empty( $state['source_drift_files'][ $entry_key ] ) ) {
+            $state['source_drift_files'][ $entry_key ] = true;
+            $state['source_drift_count'] = (int) ( $state['source_drift_count'] ?? 0 ) + 1;
+            if ( count( (array) ( $state['source_drift_samples'] ?? array() ) ) < 20 ) {
+                $state['source_drift_samples'][] = array(
+                    'path'          => ltrim( str_replace( '\\', '/', (string) $relative ), '/' ),
+                    'planned_size'  => $planned_size,
+                    'captured_size' => (int) $snapshot['size'],
+                );
+            }
+        }
+
+        return array(
+            'source'        => (string) $snapshot['path'],
+            'size'          => (int) $snapshot['size'],
+            'source_mtime'  => (int) $snapshot['mtime'],
+            'archive_mtime' => (int) $snapshot['origin_mtime'],
+            'is_snapshot'   => true,
+        );
+    }
+
+    /**
+     * Create and verify a private immutable copy of one changing source file.
+     *
+     * The source metadata is checked before and after the copy and both streams
+     * are hashed. A source that keeps changing is retried a bounded number of
+     * times and then reported as a genuine live-write conflict.
+     *
+     * @param string $source   Absolute source path.
+     * @param string $relative Portable relative path.
+     * @return array{path:string,size:int,mtime:int,origin_mtime:int}
+     */
+    private function create_stable_source_snapshot( $source, $relative ) {
+        $directory = $this->session_dir . 'source-snapshots/';
+        if ( ! is_dir( $directory ) ) {
+            if ( ! wp_mkdir_p( $directory ) ) {
+                throw new Exception( __( 'Unable to create the source snapshot directory.', 'clone-master' ) );
+            }
+            WPCM_Plugin::protect_directory( $directory, false );
+        }
+
+        for ( $attempt = 1; $attempt <= 3; $attempt++ ) {
+            clearstatcache( true, $source );
+            $before = @stat( $source );
+            if ( ! is_array( $before ) || ! is_file( $source ) || is_link( $source ) || ! is_readable( $source ) ) {
+                throw new Exception( sprintf( __( 'A backup source disappeared while it was being stabilized: %s', 'clone-master' ), $source ) );
+            }
+
+            try {
+                $suffix = bin2hex( random_bytes( 8 ) );
+            } catch ( Throwable $error ) {
+                $suffix = preg_replace( '/[^a-zA-Z0-9]/', '', wp_generate_password( 20, false, false ) );
+            }
+            $snapshot = $directory . hash( 'sha256', (string) $relative ) . '-' . $suffix . '.bin';
+
+            WPCM_Reliability::atomic_copy( $source, $snapshot, 0640 );
+            clearstatcache( true, $source );
+            clearstatcache( true, $snapshot );
+            $after_copy = @stat( $source );
+            $copy_stat  = @stat( $snapshot );
+            $copy_hash  = is_file( $snapshot ) ? @hash_file( 'sha256', $snapshot ) : false;
+            $source_hash = @hash_file( 'sha256', $source );
+            clearstatcache( true, $source );
+            $after_hash = @stat( $source );
+
+            $stable = is_array( $after_copy ) && is_array( $after_hash ) && is_array( $copy_stat )
+                && (int) $before['size'] === (int) $after_copy['size']
+                && (int) $before['size'] === (int) $after_hash['size']
+                && (int) $before['mtime'] === (int) $after_copy['mtime']
+                && (int) $before['mtime'] === (int) $after_hash['mtime']
+                && (int) $before['ctime'] === (int) $after_copy['ctime']
+                && (int) $before['ctime'] === (int) $after_hash['ctime']
+                && (int) $copy_stat['size'] === (int) $before['size']
+                && is_string( $copy_hash )
+                && is_string( $source_hash )
+                && hash_equals( $copy_hash, $source_hash );
+
+            if ( $stable ) {
+                return array(
+                    'path'         => $snapshot,
+                    'size'         => (int) $copy_stat['size'],
+                    'mtime'        => (int) $copy_stat['mtime'],
+                    'origin_mtime' => (int) $before['mtime'],
+                );
+            }
+
+            @unlink( $snapshot );
+        }
+
+        throw new Exception( sprintf( __( 'A backup source kept changing and could not be captured consistently: %s', 'clone-master' ), $source ) );
+    }
+
+    /**
+     * Remove an incomplete file entry and request a stable snapshot retry.
+     *
+     * @param resource $archive Open WPCM archive stream.
+     * @param array    $state   Mutable archive state.
+     * @param array    $current Current file state.
+     * @return void
+     */
+    private function retry_changed_archive_entry( $archive, array &$state, array $current ) {
+        if ( ! empty( $current['is_snapshot'] ) ) {
+            throw new Exception( sprintf( __( 'A stabilized backup source was altered unexpectedly: %s', 'clone-master' ), $current['origin_source'] ) );
+        }
+
+        $rollback_offset = (int) ( $current['archive_offset'] ?? -1 );
+        if ( $rollback_offset < 0 || ! @ftruncate( $archive, $rollback_offset ) || 0 !== @fseek( $archive, $rollback_offset ) ) {
+            throw new Exception( sprintf( __( 'Backup source changed while archiving and the entry could not be retried safely: %s', 'clone-master' ), $current['origin_source'] ) );
+        }
+
+        $entry_key = (string) ( $current['entry_key'] ?? '' );
+        if ( '' !== $entry_key ) {
+            $state['force_snapshot'][ $entry_key ] = true;
+        }
+        $state['current_entry'] = null;
+    }
+
     // =========================================================================
     // Step 4: Archive files with an adaptive, resumable worker
     // =========================================================================
@@ -2174,7 +2346,11 @@ class WPCM_Exporter {
             }
             WPCM_Plugin::protect_directory( WPCM_BACKUP_DIR );
 
-            $partial = WPCM_BACKUP_DIR . sanitize_file_name( $this->manifest['package_filename'] ) . '.partial';
+            $package_filename = (string) $this->manifest['package_filename'];
+            if ( ! WPCM_Reliability::is_safe_archive_filename( $package_filename ) ) {
+                throw new Exception( __( 'The WPCM package filename is invalid.', 'clone-master' ) );
+            }
+            $partial = WPCM_BACKUP_DIR . $package_filename . '.partial';
             if ( is_file( $partial ) || is_link( $partial ) ) {
                 throw new Exception( __( 'An untracked partial WPCM container already exists.', 'clone-master' ) );
             }
@@ -2259,6 +2435,11 @@ class WPCM_Exporter {
                 'worker_input_bytes'   => 0,
                 'worker_throughput'    => 0.0,
                 'worker_reason'        => 'learning',
+                'source_drift_count'   => 0,
+                'source_drift_files'   => array(),
+                'source_drift_samples' => array(),
+                'resolved_entry_sizes' => array(),
+                'force_snapshot'       => array(),
                 'started_at'           => microtime( true ),
             );
             WPCM_Reliability::atomic_signed_json( $state_path, $state, $context );
@@ -2364,22 +2545,25 @@ class WPCM_Exporter {
                         $state['entry_index'] = 0;
                         continue;
                     }
-                    $entry = $entries[ (int) $state['entry_index'] ];
-                    $source = (string) ( $entry['path'] ?? '' );
-                    $relative = ltrim( str_replace( '\\', '/', (string) ( $entry['relative'] ?? '' ) ), '/' );
-                    if ( ! is_file( $source ) || is_link( $source ) || ! is_readable( $source )
-                        || (int) @filesize( $source ) !== (int) $entry['size']
-                        || (int) @filemtime( $source ) !== (int) $entry['mtime'] ) {
-                        throw new Exception( sprintf( __( 'Backup source changed after scanning: %s', 'clone-master' ), $source ) );
-                    }
+                    $entry     = $entries[ (int) $state['entry_index'] ];
+                    $relative  = ltrim( str_replace( '\\', '/', (string) ( $entry['relative'] ?? '' ) ), '/' );
+                    $entry_key = $queue_index . ':' . (int) $state['entry_index'];
+                    $prepared  = $this->prepare_archive_source( $entry, $relative, $entry_key, $state );
+                    $source    = (string) $prepared['source'];
                     $archive_entry = 'wp-content/' . $relative;
-                    WPCM_Archive::append_file_header( $archive, $archive_entry, (int) $entry['size'], (int) $entry['mtime'] );
+                    $entry_archive_offset = (int) ftell( $archive );
+                    WPCM_Archive::append_file_header( $archive, $archive_entry, (int) $prepared['size'], (int) $prepared['archive_mtime'] );
                     $state['current_entry'] = array(
                         'source'            => $source,
+                        'origin_source'     => (string) ( $entry['path'] ?? '' ),
                         'relative'          => $relative,
                         'archive_entry'     => $archive_entry,
-                        'size'              => (int) $entry['size'],
-                        'mtime'             => (int) $entry['mtime'],
+                        'size'              => (int) $prepared['size'],
+                        'mtime'             => (int) $prepared['source_mtime'],
+                        'archive_mtime'     => (int) $prepared['archive_mtime'],
+                        'entry_key'         => $entry_key,
+                        'archive_offset'    => $entry_archive_offset,
+                        'is_snapshot'       => ! empty( $prepared['is_snapshot'] ),
                         'source_offset'     => 0,
                         'allow_compression' => $this->archive_entry_allows_compression( $archive_entry ),
                     );
@@ -2389,15 +2573,33 @@ class WPCM_Exporter {
                 $input   = @fopen( $current['source'], 'rb' );
                 if ( ! is_resource( $input ) || 0 !== @fseek( $input, (int) $current['source_offset'] ) ) {
                     if ( is_resource( $input ) ) fclose( $input );
+                    clearstatcache( true, $current['source'] );
+                    if ( empty( $current['is_snapshot'] )
+                        && ( ! is_file( $current['source'] )
+                            || (int) @filesize( $current['source'] ) !== (int) $current['size']
+                            || (int) @filemtime( $current['source'] ) !== (int) $current['mtime'] ) ) {
+                        $this->retry_changed_archive_entry( $archive, $state, $current );
+                        continue;
+                    }
                     throw new Exception( __( 'Unable to resume a source file.', 'clone-master' ) );
                 }
+                $retry_current = false;
                 try {
                     while ( (int) $state['current_entry']['source_offset'] < (int) $current['size']
                         && $slice_bytes < $target_bytes
                         && ( microtime( true ) - $started ) < $time_budget ) {
                         $remaining = (int) $current['size'] - (int) $state['current_entry']['source_offset'];
                         $raw = fread( $input, min( WPCM_Archive::CHUNK_BYTES, $remaining ) );
-                        if ( false === $raw || '' === $raw ) {
+                        if ( false === $raw ) {
+                            throw new Exception( __( 'Unable to read a source file.', 'clone-master' ) );
+                        }
+                        if ( '' === $raw ) {
+                            clearstatcache( true, $current['source'] );
+                            if ( empty( $current['is_snapshot'] )
+                                && (int) @filesize( $current['source'] ) !== (int) $current['size'] ) {
+                                $retry_current = true;
+                                break;
+                            }
                             throw new Exception( __( 'Unable to read a source file.', 'clone-master' ) );
                         }
                         WPCM_Archive::append_chunk( $archive, $raw, ! empty( $current['allow_compression'] ) );
@@ -2409,10 +2611,17 @@ class WPCM_Exporter {
                     fclose( $input );
                 }
 
+                if ( $retry_current ) {
+                    $this->retry_changed_archive_entry( $archive, $state, $current );
+                    continue;
+                }
+
                 if ( (int) $state['current_entry']['source_offset'] >= (int) $current['size'] ) {
+                    clearstatcache( true, $current['source'] );
                     if ( (int) @filesize( $current['source'] ) !== (int) $current['size']
                         || (int) @filemtime( $current['source'] ) !== (int) $current['mtime'] ) {
-                        throw new Exception( sprintf( __( 'Backup source changed while archiving: %s', 'clone-master' ), $current['source'] ) );
+                        $this->retry_changed_archive_entry( $archive, $state, $current );
+                        continue;
                     }
                     WPCM_Archive::append_file_end( $archive, (int) $current['size'] );
                     $state['files_count']++;
@@ -2467,6 +2676,16 @@ class WPCM_Exporter {
             }
             $this->manifest['files_count'] = (int) $state['files_count'];
             $this->manifest['files_size']  = (int) $state['files_size'];
+            if ( isset( $this->manifest['inventory'] ) && is_array( $this->manifest['inventory'] ) ) {
+                $this->manifest['inventory']['files']       = (int) $state['files_count'];
+                $this->manifest['inventory']['files_bytes'] = (int) $state['files_size'];
+                $this->manifest['inventory']['source_bytes'] = (int) $state['database_size'] + (int) $state['files_size'];
+            }
+            $this->manifest['file_source_drift'] = array(
+                'count'   => (int) ( $state['source_drift_count'] ?? 0 ),
+                'samples' => array_values( (array) ( $state['source_drift_samples'] ?? array() ) ),
+                'mode'    => 'stable-snapshot',
+            );
             $this->manifest['steps_done'][] = 'files_archive';
             $this->manifest['steps_done'] = array_values( array_unique( $this->manifest['steps_done'] ) );
             $this->save_manifest();
@@ -2633,6 +2852,14 @@ class WPCM_Exporter {
             $exclusion = array( 'code' => 'all-in-one-wp-migration-storage', 'backup' => true );
         }
 
+        // Spectra/Astra stores regenerable block-template JSON and guard files
+        // in uploads. These cache files may be rewritten during a long export
+        // and are recreated automatically when the template library is used.
+        if ( false === $exclusion && 'uploads' === $mode
+            && preg_match( '#^uploads/ast-block-templates-json(?:/|$)#i', $normalized ) ) {
+            $exclusion = array( 'code' => 'spectra-block-template-cache', 'backup' => false );
+        }
+
         // Known local backup locations used by popular migration and backup
         // plugins. Some are outside the roots currently scanned, but retaining
         // the rules here keeps future content-root expansion safe.
@@ -2793,14 +3020,42 @@ class WPCM_Exporter {
     // Step 6: Package
     // =========================================================================
     private function step_package() {
-        $filename = sanitize_file_name( (string) ( $this->manifest['package_filename'] ?? '' ) );
-        $domain_first = preg_match( '/^[a-z0-9](?:[a-z0-9.-]{0,99})-backup-manual-[0-9]{8}T[0-9]{6}-[a-f0-9]{12}\.wpcm$/', $filename );
-        $legacy_name  = preg_match( '/^backup-manual-[0-9]{8}T[0-9]{6}-[a-f0-9]{12}\.wpcm$/', $filename );
-        if ( ! $domain_first && ! $legacy_name ) {
+        $state = WPCM_Reliability::read_signed_json(
+            $this->session_dir . 'archive-state.json',
+            'export-wpcm-archive:' . $this->session_id
+        );
+
+        // The signed archive state records the exact partial basename created by
+        // the writer. Prefer it over re-sanitizing the manifest value because
+        // sanitize_file_name() is filterable and may return a different result
+        // in another HTTP request or hosting environment.
+        $filename         = '';
+        $partial_relative = is_array( $state ) ? (string) ( $state['partial_relative'] ?? '' ) : '';
+        if ( '' !== $partial_relative
+            && basename( $partial_relative ) === $partial_relative
+            && '.partial' === substr( $partial_relative, -8 ) ) {
+            $state_filename = substr( $partial_relative, 0, -8 );
+            if ( WPCM_Reliability::is_safe_archive_filename( $state_filename ) ) {
+                $filename = $state_filename;
+            }
+        }
+
+        $manifest_filename = (string) ( $this->manifest['package_filename'] ?? '' );
+        if ( '' === $filename && WPCM_Reliability::is_safe_archive_filename( $manifest_filename ) ) {
+            $filename         = $manifest_filename;
+            $partial_relative = $filename . '.partial';
+        }
+        if ( '' === $filename ) {
             throw new Exception( __( 'The WPCM package filename is invalid.', 'clone-master' ) );
         }
+
         $final   = WPCM_BACKUP_DIR . $filename;
-        $partial = $final . '.partial';
+        $partial = WPCM_BACKUP_DIR . $partial_relative;
+
+        if ( $manifest_filename !== $filename ) {
+            $this->manifest['package_filename'] = $filename;
+            $this->save_manifest();
+        }
 
         if ( is_file( $final ) ) {
             $footer_hash = WPCM_Archive::footer_payload_hash( $final );
@@ -2821,10 +3076,6 @@ class WPCM_Exporter {
             );
         }
 
-        $state = WPCM_Reliability::read_signed_json(
-            $this->session_dir . 'archive-state.json',
-            'export-wpcm-archive:' . $this->session_id
-        );
         if ( ! is_array( $state ) || 'complete' !== ( $state['phase'] ?? '' ) || ! is_file( $partial ) ) {
             throw new Exception( __( 'The append-only WPCM payload is incomplete.', 'clone-master' ) );
         }
@@ -2855,10 +3106,23 @@ class WPCM_Exporter {
         // A retry can arrive after the footer was durably appended but before
         // the atomic rename. Full decompression is reserved for that uncommon
         // recovery path; normal publication avoids rereading every block.
-        $payload_hash = WPCM_Archive::footer_payload_hash( $partial );
+        $payload_hash = WPCM_Archive::footer_payload_hash( $partial, 2 );
         if ( null === $payload_hash ) {
-            $payload_hash = WPCM_Archive::finalize( $partial, $this->manifest );
-            if ( WPCM_Archive::footer_payload_hash( $partial ) !== $payload_hash ) {
+            // The authenticated checkpoint is the exact end of the append-only
+            // file payload. Truncate any incomplete DONE record or partial footer
+            // left by an interrupted request before attempting finalization again.
+            $checkpoint = (int) ( $state['archive_offset'] ?? 0 );
+            $repair     = WPCM_Archive::open_at_checkpoint( $partial, $checkpoint );
+            try {
+                WPCM_Archive::flush( $repair );
+            } finally {
+                fclose( $repair );
+            }
+            clearstatcache( true, $partial );
+
+            $payload_hash  = WPCM_Archive::finalize( $partial, $this->manifest );
+            $verified_hash = WPCM_Archive::footer_payload_hash( $partial, 6 );
+            if ( ! is_string( $verified_hash ) || ! hash_equals( $payload_hash, $verified_hash ) ) {
                 throw new Exception( __( 'The WPCM footer could not be verified after finalization.', 'clone-master' ) );
             }
         } else {
@@ -2872,6 +3136,15 @@ class WPCM_Exporter {
         }
         if ( ! @rename( $partial, $final ) ) {
             throw new Exception( __( 'Unable to atomically publish the WPCM container.', 'clone-master' ) );
+        }
+        clearstatcache( true, $partial );
+        clearstatcache( true, $final );
+        $published_payload_hash = WPCM_Archive::footer_payload_hash( $final, 6 );
+        if ( ! is_string( $published_payload_hash ) || ! hash_equals( $payload_hash, $published_payload_hash ) ) {
+            @rename( $final, $partial );
+            clearstatcache( true, $final );
+            clearstatcache( true, $partial );
+            throw new Exception( __( 'The published WPCM container has an invalid footer.', 'clone-master' ) );
         }
         WPCM_Reliability::atomic_write( $final . '.sha256', $file_hash . "\n", 0640 );
 
@@ -2916,7 +3189,7 @@ class WPCM_Exporter {
     // Step 7: Cleanup
     // =========================================================================
     private function step_cleanup() {
-        foreach ( array( 'sql', 'files', 'queue' ) as $name ) {
+        foreach ( array( 'sql', 'files', 'queue', 'source-snapshots' ) as $name ) {
             $path = $this->session_dir . $name . '/';
             if ( is_dir( $path ) ) {
                 $this->recursive_delete( $path );

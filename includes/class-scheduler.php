@@ -316,7 +316,7 @@ class WPCM_Scheduler {
         }
         if ( 'package' === $step ) {
             $job['package'] = array(
-                'filename' => sanitize_file_name( (string) ( $result['filename'] ?? '' ) ),
+                'filename' => (string) ( $result['filename'] ?? '' ),
                 'sha256'   => sanitize_text_field( (string) ( $result['sha256'] ?? '' ) ),
             );
         }
@@ -440,9 +440,9 @@ class WPCM_Scheduler {
      * @return array
      */
     private function finalize_local_archive( array $job ): array {
-        $filename = sanitize_file_name( (string) ( $job['package']['filename'] ?? '' ) );
+        $filename = (string) ( $job['package']['filename'] ?? '' );
         $expected = strtolower( (string) ( $job['package']['sha256'] ?? '' ) );
-        if ( '' === $filename || ! preg_match( '/^[a-zA-Z0-9._-]+\.wpcm$/', $filename ) ) {
+        if ( ! WPCM_Reliability::is_safe_archive_filename( $filename ) ) {
             throw new RuntimeException( __( 'The exporter did not provide a valid package filename.', 'clone-master' ) );
         }
 
@@ -454,6 +454,9 @@ class WPCM_Scheduler {
                 // Backward compatibility for a legacy package resumed after update.
                 $target_name = 'auto_' . $filename;
             }
+        }
+        if ( ! WPCM_Reliability::is_safe_archive_filename( $target_name ) ) {
+            throw new RuntimeException( __( 'The exporter did not provide a valid package filename.', 'clone-master' ) );
         }
         $source_path = WPCM_BACKUP_DIR . $filename;
         $target_path = WPCM_BACKUP_DIR . $target_name;

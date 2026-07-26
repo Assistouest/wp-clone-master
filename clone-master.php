@@ -3,7 +3,7 @@
  * Plugin Name: Clone Master
  * Plugin URI: https://github.com/Assistouest/clone-master
  * Description: Create resumable WordPress backups and perform staged migrations with strict validation and transactional rollback.
- * Version: 3.2.7
+ * Version: 3.2.11
  * Author: Adrien Piron
  * Author URI: https://profiles.wordpress.org/adrienpiron/
  * License: GPL v2 or later
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 if ( ! defined( 'WPCM_VERSION' ) ) {
-    define( 'WPCM_VERSION', '3.2.7' );
+    define( 'WPCM_VERSION', '3.2.11' );
 }
 if ( ! defined( 'WPCM_PLUGIN_DIR' ) ) {
     define( 'WPCM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
@@ -432,7 +432,7 @@ class WPCM_Plugin {
 
         // Content-addressed asset filenames prevent stale proxy, CDN, browser and optimization-plugin caches.
         wp_enqueue_style( 'wpcm-admin', WPCM_PLUGIN_URL . 'admin/css/admin.73a3aa2fea18.css', [], WPCM_VERSION );
-        wp_enqueue_script( 'wpcm-admin', WPCM_PLUGIN_URL . 'admin/js/admin.4ca742bc6270.js', [ 'wp-element', 'wp-i18n' ], WPCM_VERSION, true );
+        wp_enqueue_script( 'wpcm-admin', WPCM_PLUGIN_URL . 'admin/js/admin.221f5641ea8f.js', [ 'wp-element', 'wp-i18n' ], WPCM_VERSION, true );
         wp_set_script_translations( 'wpcm-admin', 'clone-master', WPCM_PLUGIN_DIR . 'languages' );
 
         // Schedule tab: loaded after admin.js and addressed by its content hash.
@@ -1369,13 +1369,10 @@ class WPCM_Plugin {
      */
     private function resolve_local_backup( string $raw_name ): ?array {
         $normalized = str_replace( '\\', '/', trim( $raw_name ) );
-        if ( '' === $normalized || $normalized !== basename( $normalized ) ) {
+        if ( ! WPCM_Reliability::is_safe_archive_filename( $normalized ) ) {
             return null;
         }
-        $name = sanitize_file_name( $normalized );
-        if ( $name !== $normalized || 'wpcm' !== strtolower( (string) pathinfo( $name, PATHINFO_EXTENSION ) ) ) {
-            return null;
-        }
+        $name = $normalized;
 
         $base_real = realpath( WPCM_BACKUP_DIR );
         $path      = WPCM_BACKUP_DIR . $name;

@@ -52,17 +52,22 @@ final class WPCM_Archive {
      */
     public static function open_at_checkpoint( $path, $offset ) {
         $offset = (int) $offset;
-        if ( $offset < strlen( self::MAGIC ) || ! is_file( $path ) ) {
+        if ( $offset < strlen( self::MAGIC ) ) {
             throw new RuntimeException( 'The WPCM checkpoint is invalid.' );
         }
-        $size = @filesize( $path );
-        if ( false === $size || $size < $offset ) {
-            throw new RuntimeException( 'The WPCM container is shorter than its checkpoint.' );
-        }
-        $handle = @fopen( $path, 'c+b' );
+
+        clearstatcache( true, $path );
+        $handle = @fopen( $path, 'r+b' );
         if ( ! is_resource( $handle ) ) {
             throw new RuntimeException( 'Unable to reopen the WPCM container.' );
         }
+        $stat = @fstat( $handle );
+        $size = is_array( $stat ) && isset( $stat['size'] ) ? (int) $stat['size'] : -1;
+        if ( $size < $offset ) {
+            fclose( $handle );
+            throw new RuntimeException( 'The WPCM container is shorter than its checkpoint.' );
+        }
+
         rewind( $handle );
         $magic = fread( $handle, strlen( self::MAGIC ) );
         if ( self::MAGIC !== $magic || ! @ftruncate( $handle, $offset ) || 0 !== @fseek( $handle, $offset ) ) {
@@ -129,6 +134,7 @@ final class WPCM_Archive {
         } finally {
             fclose( $handle );
         }
+        clearstatcache( true, $path );
         $hash = hash_file( 'sha256', $path );
         if ( ! is_string( $hash ) || ! preg_match( '/^[a-f0-9]{64}$/', $hash ) ) {
             throw new RuntimeException( 'Unable to calculate the WPCM payload checksum.' );
@@ -143,6 +149,7 @@ final class WPCM_Archive {
         } finally {
             fclose( $handle );
         }
+        clearstatcache( true, $path );
         return $hash;
     }
 
@@ -152,31 +159,51 @@ final class WPCM_Archive {
      * decompressing the complete archive. This is intentionally a lightweight
      * state check; full structural validation remains available through inspect().
      *
-     * @param string $path Container path.
+     * @param string $path     Container path.
+     * @param int    $attempts Bounded read attempts for delayed filesystem metadata.
      * @return string|null Lowercase SHA-256 payload hash, or null when unfinished.
      */
-    public static function footer_payload_hash( $path ) {
-        $size = @filesize( $path );
-        if ( false === $size || $size < strlen( self::MAGIC ) + self::FOOTER_BYTES ) {
-            return null;
-        }
-        $handle = @fopen( $path, 'rb' );
-        if ( ! is_resource( $handle ) ) {
-            return null;
-        }
-        try {
-            if ( 0 !== @fseek( $handle, $size - self::FOOTER_BYTES ) ) {
-                return null;
+    public static function footer_payload_hash( $path, $attempts = 1 ) {
+        $attempts = max( 1, min( 8, (int) $attempts ) );
+
+        for ( $attempt = 1; $attempt <= $attempts; $attempt++ ) {
+            // Shared, overlay, and network-backed filesystems may expose stale
+            // path metadata immediately after an append. Read the size from the
+            // opened inode instead of trusting PHP's process-level stat cache.
+            clearstatcache( true, $path );
+            $handle = @fopen( $path, 'rb' );
+            $footer = null;
+
+            if ( is_resource( $handle ) ) {
+                try {
+                    $stat = @fstat( $handle );
+                    $size = is_array( $stat ) && isset( $stat['size'] ) ? (int) $stat['size'] : -1;
+                    if ( $size >= strlen( self::MAGIC ) + self::FOOTER_BYTES
+                        && 0 === @fseek( $handle, $size - self::FOOTER_BYTES ) ) {
+                        $footer = self::read_exact( $handle, self::FOOTER_BYTES );
+                    }
+                } catch ( Throwable $error ) {
+                    $footer = null;
+                } finally {
+                    fclose( $handle );
+                }
             }
-            $footer = fread( $handle, self::FOOTER_BYTES );
-        } finally {
-            fclose( $handle );
+
+            if ( is_string( $footer )
+                && strlen( $footer ) === self::FOOTER_BYTES
+                && self::FOOTER_MAGIC === substr( $footer, 0, 4 ) ) {
+                $hash = substr( $footer, 4 );
+                if ( preg_match( '/^[a-f0-9]{64}$/', $hash ) ) {
+                    return $hash;
+                }
+            }
+
+            if ( $attempt < $attempts ) {
+                usleep( min( 250000, 25000 * $attempt ) );
+            }
         }
-        if ( ! is_string( $footer ) || strlen( $footer ) !== self::FOOTER_BYTES || self::FOOTER_MAGIC !== substr( $footer, 0, 4 ) ) {
-            return null;
-        }
-        $hash = substr( $footer, 4 );
-        return preg_match( '/^[a-f0-9]{64}$/', $hash ) ? $hash : null;
+
+        return null;
     }
 
     /**

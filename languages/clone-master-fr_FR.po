@@ -5,7 +5,7 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: Clone Master 3.2.7\n"
+"Project-Id-Version: Clone Master 3.2.11\n"
 "Report-Msgid-Bugs-To: https://github.com/Assistouest/clone-master/issues\n"
 "POT-Creation-Date: 2026-07-26 00:30+0000\n"
 "PO-Revision-Date: 2026-07-26 13:30+0200\n"
@@ -2764,3 +2764,37 @@ msgstr "Dossier wp-content"
 msgid "← Start over"
 msgstr "← Recommencer"
 
+
+#: includes/class-exporter.php
+#, php-format
+msgid "A backup source is missing, unreadable, or no longer a regular file: %s"
+msgstr "Une source de sauvegarde est absente, illisible ou n’est plus un fichier ordinaire : %s"
+
+#: includes/class-exporter.php
+#, php-format
+msgid "Unable to inspect backup source file: %s"
+msgstr "Impossible d’inspecter le fichier source de la sauvegarde : %s"
+
+#: includes/class-exporter.php
+msgid "Unable to create the source snapshot directory."
+msgstr "Impossible de créer le répertoire des copies stables des fichiers sources."
+
+#: includes/class-exporter.php
+#, php-format
+msgid "A backup source disappeared while it was being stabilized: %s"
+msgstr "Une source de sauvegarde a disparu pendant sa stabilisation : %s"
+
+#: includes/class-exporter.php
+#, php-format
+msgid "A backup source kept changing and could not be captured consistently: %s"
+msgstr "Une source de sauvegarde a continué de changer et n’a pas pu être capturée de manière cohérente : %s"
+
+#: includes/class-exporter.php
+#, php-format
+msgid "A stabilized backup source was altered unexpectedly: %s"
+msgstr "Une source de sauvegarde stabilisée a été modifiée de manière inattendue : %s"
+
+#: includes/class-exporter.php
+#, php-format
+msgid "Backup source changed while archiving and the entry could not be retried safely: %s"
+msgstr "La source de sauvegarde a changé pendant l’archivage et l’entrée n’a pas pu être reprise en toute sécurité : %s"

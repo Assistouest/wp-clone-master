@@ -4,7 +4,7 @@ Tags: backup, migration, clone, restore, nextcloud
 Requires at least: 5.6
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 3.2.7
+Stable tag: 3.2.11
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -136,6 +136,29 @@ In `wp-content/wpcm-backups/`. Published `.wpcm` backups are preserved during pl
 Clone Master contains no analytics, advertising, telemetry, or tracking. Outbound requests occur only when an administrator explicitly configures Nextcloud, and they target that configured server.
 
 == Changelog ==
+
+= 3.2.11 =
+* Fixed local backup resolution for safe multi-dot archive names such as DDEV and subdomain hostnames.
+* Download, listing, deletion, and local restore now use the same filter-independent WPCM filename validator as export finalization.
+* Preserved strict basename, extension, traversal, symlink, and realpath confinement checks.
+
+= 3.2.10 =
+* Fixed immediate footer verification failures on shared, overlay, and network-backed storage by reading the file size from the opened inode instead of stale path metadata.
+* Added bounded footer-read retries after durable finalization and atomic publication.
+* Restores the authenticated append-only checkpoint before retrying an interrupted finalization, preventing duplicate or partial manifest records.
+* Added final footer verification after the archive is renamed into the backup library.
+
+= 3.2.9 =
+* Fixed package finalization failures caused by re-sanitizing an internally generated WPCM filename in a later HTTP request.
+* Uses the authenticated archive-state partial basename as the publication source of truth, allowing failed Nginx and resumed exports to continue safely.
+* Added a filter-independent ASCII archive filename validator shared by manual and scheduled backups.
+
+= 3.2.8 =
+* Fixed exports failing when Spectra or Astra rewrites `uploads/ast-block-templates-json/index.html` after the durable file scan.
+* Excluded the regenerable Spectra/Astra block-template cache from backup contents.
+* Added verified private snapshots for regular files that change between inventory and archive writing.
+* Added safe append-only rollback and retry when a source changes while its archive entry is being streamed.
+* Preserved hard failures for missing, unreadable, symbolic-link, or repeatedly changing sources.
 
 = 3.2.7 =
 * Added a Recovery administration tab with copyable WP-CLI, standalone recovery, database import, and file recovery commands using the installation's real paths.

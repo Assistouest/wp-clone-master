@@ -2135,7 +2135,7 @@
                 h('div', { className: 'wpcm-header-text' },
                     h('div', { className: 'wpcm-title-row' },
                         h('h1', null, 'Clone Master'),
-                        h('span', { className: 'wpcm-version-badge' }, 'v' + (wpcmData.version || '3.2.7'))
+                        h('span', { className: 'wpcm-version-badge' }, 'v' + (wpcmData.version || '3.2.9'))
                     ),
                     h('p', null, __( 'Reliable WPCM backups, staged restore and production diagnostics', 'clone-master' ))
                 ),
