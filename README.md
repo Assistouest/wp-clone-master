@@ -4,7 +4,7 @@
 
 ### Sauvegarde, migration et restauration WordPress avec validation complète avant bascule
 
-**Une interface guidée pour les débutants. Un moteur de restauration conçu pour résister aux coupures, aux gros sites et aux hébergements WordPress réels.**
+**Un moteur de restauration conçu pour résister aux coupures, aux gros sites et aux hébergements WordPress.**
 
 <br>
 
@@ -21,7 +21,6 @@
 [Première sauvegarde](#créer-sa-première-sauvegarde) ·
 [Restaurer un site](#restaurer-ou-migrer-un-site) ·
 [Comprendre le moteur](#un-moteur-plus-rigoureux-quun-simple-zip) ·
-[FAQ](#questions-fréquentes)
 
 </div>
 
@@ -46,31 +45,6 @@ Depuis l’administration WordPress, il permet de :
 > [!IMPORTANT]
 > Une sauvegarde ne doit pas rester uniquement sur le serveur qui héberge le site. Téléchargez le fichier `.wpcm` et conservez au moins une copie sur un autre support.
 
----
-
-## Pour qui ?
-
-Clone Master a été pensé pour les personnes qui utilisent WordPress sans vouloir manipuler :
-
-- phpMyAdmin ;
-- FTP ou SFTP ;
-- SSH ;
-- des commandes SQL ;
-- des archives découpées manuellement ;
-- des scripts de remplacement d’URL.
-
-Il convient notamment :
-
-- aux propriétaires de sites WordPress ;
-- aux indépendants ;
-- aux petites entreprises ;
-- aux agences qui gèrent plusieurs sites ;
-- aux personnes qui changent d’hébergeur ;
-- aux utilisateurs qui veulent tester une restauration avant une intervention importante.
-
-Aucune connaissance en développement n’est nécessaire pour créer ou importer une sauvegarde.
-
----
 
 ## Pourquoi Clone Master ?
 
@@ -86,15 +60,6 @@ Cette méthode peut suffire lorsque tout se déroule parfaitement. Elle devient 
 - le remplacement des fichiers ;
 - la bascule finale.
 
-Clone Master ne cherche pas seulement à fabriquer un fichier téléchargeable.
-
-Il cherche à répondre à une question plus importante :
-
-> **Le site peut-il être restauré de manière cohérente même si une étape est interrompue ?**
-
-Pour cela, le moteur contrôle chaque phase avant de toucher au site actif.
-
----
 
 ## Créer sa première sauvegarde
 
@@ -356,7 +321,7 @@ Aucun placeholder temporaire non restauré ne doit rester enregistré dans la ba
 
 ---
 
-# Conçu pour les hébergements WordPress réels
+# Conçu pour les hébergements WordPress
 
 Construire un moteur fiable dans un environnement de test contrôlé est une première étape.
 
@@ -377,126 +342,6 @@ Clone Master a été testé notamment avec :
 Les hébergements peuvent toutefois appliquer leurs propres limites, caches et règles de sécurité.
 
 ---
-
-## Les problèmes difficiles réellement rencontrés
-
-Les anomalies les plus révélatrices n’étaient pas de simples erreurs de logique métier.
-
-Elles provenaient d’angles morts différents et non triviaux.
-
-### Pagination MySQL devenue quadratique
-
-Une pagination basée sur de grands décalages peut devenir de plus en plus lente sur une table volumineuse.
-
-Le serveur doit reparcourir un nombre croissant de lignes à chaque page. Un export qui semble rapide au début peut ralentir fortement vers la fin.
-
-Le moteur doit donc progresser à partir d’un repère stable plutôt que recompter continuellement tout ce qui a déjà été parcouru.
-
-### Ordre exact du bootstrap WordPress
-
-Toutes les fonctions WordPress ne sont pas disponibles dès les premières étapes du chargement.
-
-Un mécanisme de récupération exécuté très tôt peut se déclencher avant le chargement des fonctions dites pluggable.
-
-Le code de récupération doit donc pouvoir fonctionner sans supposer que l’administration ou l’ensemble du cœur WordPress est déjà initialisé.
-
-### `AUTO_INCREMENT` sur une table vivante
-
-Une table active peut recevoir une nouvelle ligne entre deux lectures.
-
-Son compteur `AUTO_INCREMENT` évolue alors, même si la structure réelle de la table n’a pas changé.
-
-Une comparaison brute des instructions `CREATE TABLE` peut signaler une corruption inexistante. Clone Master normalise ces éléments variables avant de comparer les schémas.
-
-### Cache HTTP avant l’exécution de PHP
-
-Un cache serveur peut répondre à une requête avant que WordPress ou le plugin ne soit exécuté.
-
-Le symptôme ressemble à un bug AJAX ou à une réponse périmée du plugin, alors que le code PHP n’a jamais reçu la requête.
-
-Ce cas est particulièrement difficile à diagnostiquer sur :
-
-- LiteSpeed ;
-- nginx avec cache ;
-- certains hébergements mutualisés ;
-- un site placé derrière un proxy ou un CDN.
-
-### Loopback et tâches planifiées
-
-Certains serveurs bloquent les requêtes internes utilisées par WordPress pour se rappeler lui-même.
-
-Un moteur robuste ne peut pas supposer qu’un appel loopback ou que WP-Cron fonctionne toujours de la même manière sur tous les hébergeurs.
-
----
-
-## Ce que signifie `installer_schema_prefix_normalized`
-
-Ce message peut apparaître dans les diagnostics :
-
-```text
-installer_schema_prefix_normalized
-```
-
-Pendant le staging, les tables portent un préfixe temporaire.
-
-MariaDB peut reprendre ce préfixe dans :
-
-- un nom de contrainte ;
-- une clé étrangère ;
-- une référence de table ;
-- certains éléments du `CREATE TABLE`.
-
-Clone Master calcule alors deux versions :
-
-```text
-legacy_hash
-canonical_hash
-```
-
-Lorsque :
-
-```text
-canonical_hash = expected_hash
-```
-
-la table est valide.
-
-Le schéma brut diffère uniquement à cause du préfixe temporaire. Le moteur l’a normalisé, puis a retrouvé exactement le hash attendu.
-
-Ce message décrit donc une validation réussie. Il ne signale pas une corruption de la table.
-
----
-
-## Diagnostics
-
-Chaque événement important peut contenir :
-
-- une date ;
-- un niveau ;
-- une étape ;
-- un identifiant de requête ;
-- la mémoire utilisée ;
-- un contexte technique ;
-- un identifiant de diagnostic.
-
-Exemple :
-
-```text
-diag_20260725185849_8bedc26be2
-```
-
-Cet identifiant permet de retrouver rapidement l’événement correspondant dans le rapport exporté.
-
-### Informations utiles pour signaler un problème
-
-- version de Clone Master ;
-- version de WordPress ;
-- version de PHP ;
-- serveur web ;
-- version de MySQL ou MariaDB ;
-- message complet ;
-- identifiant `diag_...` ;
-- étape où l’opération s’est arrêtée.
 
 Ne publiez jamais dans une issue publique :
 
@@ -519,60 +364,7 @@ Ne publiez jamais dans une issue publique :
 - [ ] Contrôler les pages importantes après la restauration
 - [ ] Exporter le diagnostic avant de nettoyer une session ayant échoué
 
----
 
-# Questions fréquentes
-
-<details>
-<summary><strong>Dois-je décompresser le fichier .wpcm ?</strong></summary>
-
-Non. Importez directement le fichier dans Clone Master.
-
-</details>
-
-<details>
-<summary><strong>Puis-je migrer vers un autre domaine ?</strong></summary>
-
-Oui. Clone Master remplace les anciennes URL et les anciens chemins dans les textes et les structures sérialisées reconnues.
-
-</details>
-
-<details>
-<summary><strong>L’envoi reprend-il après une coupure ?</strong></summary>
-
-Le système d’envoi découpé est conçu pour repartir du dernier bloc reçu et vérifié lorsque la session peut être récupérée.
-
-</details>
-
-<details>
-<summary><strong>Le site actif est-il modifié dès le début ?</strong></summary>
-
-Non. Les fichiers et la base sont d’abord préparés dans une zone de staging. La bascule intervient seulement après les validations.
-
-</details>
-
-<details>
-<summary><strong>Une alerte signifie-t-elle toujours que la restauration a échoué ?</strong></summary>
-
-Non. Certains événements décrivent une normalisation ou une mesure de compatibilité. Le résultat final et le niveau de l’événement doivent être consultés.
-
-</details>
-
-<details>
-<summary><strong>Une sauvegarde remplace-t-elle une stratégie externe ?</strong></summary>
-
-Non. Une stratégie sérieuse conserve plusieurs copies, dont au moins une en dehors du serveur principal.
-
-</details>
-
-<details>
-<summary><strong>Que faire après une restauration réussie ?</strong></summary>
-
-Testez la connexion, les permaliens, les médias, les formulaires, les comptes, les tâches planifiées et les fonctions métier importantes.
-
-</details>
-
----
 
 ## Philosophie du projet
 
