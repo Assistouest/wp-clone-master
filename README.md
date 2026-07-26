@@ -21,7 +21,7 @@
 [Créer une sauvegarde](#créer-une-sauvegarde-wordpress) ·
 [Restaurer ou migrer](#restaurer-ou-migrer-un-site-wordpress) ·
 [Utiliser WP-CLI](#wp-cli-et-environnement-de-secours) ·
-[Signaler un problème](https://github.com/Assistouest/clone-master/issues)
+[Signaler un problème](https://github.com/Assistouest/wp-clone-master/issues)
 
 </div>
 
