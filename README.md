@@ -305,15 +305,3 @@ Clone Master ne contient ni mesure d'audience, ni publicité, ni télémétrie, 
 ## Licence
 
 Clone Master est distribué sous licence **GPL-2.0-or-later**. Consultez le fichier [`LICENSE`](LICENSE) pour le texte complet de la licence.
-
-## Gérer un parc de sites WordPress
-
-Clone Master intervient au niveau d'un site pour la sauvegarde, la migration et la récupération. Pour centraliser les mises à jour, la sécurité, la disponibilité, les performances et les rapports clients d'un parc WordPress, découvrez WP Commander.
-
-<div align="center">
-
-### [Gérer plusieurs sites WordPress depuis un seul tableau de bord](https://wpcommander.fr/)
-
-Supervisez les sites de vos clients, traitez les actions prioritaires et produisez les preuves de votre maintenance depuis un espace conçu pour les agences WordPress.
-
-</div>
